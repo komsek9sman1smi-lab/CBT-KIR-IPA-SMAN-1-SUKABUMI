@@ -1,0 +1,6 @@
+{
+  "name": "CBT KIR IPA SMAN 1 SUKABUMI",
+  "description": "Sistem Computer Based Test (CBT) resmi Kelompok Ilmiah Remaja (KIR) IPA SMA Negeri 1 Sukabumi dengan bank soal multiformat, timer server, anti-cheat, penilaian otomatis & esai, analisis butir soal, dan paket Google Apps Script.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

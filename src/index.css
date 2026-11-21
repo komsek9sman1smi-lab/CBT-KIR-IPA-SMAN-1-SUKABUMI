@@ -1,0 +1,64 @@
+@import "tailwindcss";
+@import "katex/dist/katex.min.css";
+
+@layer base {
+  :root {
+    --font-display: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-sans: 'DM Sans', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    --color-navy: #0f294a;
+    --color-primary: #1d4ed8;
+    --color-gold: #d97706;
+  }
+
+  body {
+    font-family: var(--font-sans);
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono, .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.prose-question table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+  font-size: 0.875rem;
+}
+
+.prose-question th,
+.prose-question td {
+  border: 1px solid #cbd5e1;
+  padding: 0.45rem 0.65rem;
+  text-align: left;
+}
+
+.prose-question th {
+  background-color: #f1f5f9;
+  font-weight: 600;
+}
+
+.prose-question img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+  body {
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+}

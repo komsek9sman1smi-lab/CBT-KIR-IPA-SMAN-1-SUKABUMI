@@ -1,0 +1,20 @@
+{
+	"appId": "id.sch.sman1sukabumi.kiripa.cbt",
+	"appName": "CBT KIR IPA",
+	"webDir": "dist",
+	"server": {
+		"url": "https://ais-pre-zrwv5jm7eg77wohqqgp37g-187876417707.asia-northeast1.run.app",
+		"cleartext": false,
+		"androidScheme": "https",
+		"allowNavigation": [
+			"ais-pre-zrwv5jm7eg77wohqqgp37g-187876417707.asia-northeast1.run.app",
+			"*.run.app"
+		]
+	},
+	"android": {
+		"backgroundColor": "#0F294A",
+		"allowMixedContent": false,
+		"captureInput": true,
+		"webContentsDebuggingEnabled": false
+	}
+}

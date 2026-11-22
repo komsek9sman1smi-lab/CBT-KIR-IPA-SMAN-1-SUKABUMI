@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CBT KIR IPA</string>
+    <string name="title_activity_main">CBT KIR IPA SMAN 1 Sukabumi</string>
+    <string name="package_name">id.sch.sman1sukabumi.kiripa.cbt</string>
+    <string name="custom_url_scheme">id.sch.sman1sukabumi.kiripa.cbt</string>
+</resources>

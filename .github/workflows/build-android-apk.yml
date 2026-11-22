@@ -1,0 +1,122 @@
+name: Build Android APK (CBT KIR IPA)
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      server_url:
+        description: 'URL Server CBT (HTTPS)'
+        required: false
+        default: 'https://ais-pre-zrwv5jm7eg77wohqqgp37g-187876417707.asia-northeast1.run.app'
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build APK CBT KIR IPA SMAN 1 Sukabumi
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web bundle
+        run: npm run build
+
+      - name: Prepare Android project if missing
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+            if ! command -v convert >/dev/null 2>&1; then
+              sudo apt-get update && sudo apt-get install -y imagemagick
+            fi
+            if [ -f "public/favicon.ico" ]; then
+              for spec in \
+                "mdpi:48:108:70" \
+                "hdpi:72:162:104" \
+                "xhdpi:96:216:140" \
+                "xxhdpi:144:324:210" \
+                "xxxhdpi:192:432:280"; do
+                IFS=: read -r density icon_sz fg_sz fg_inner <<< "$spec"
+                dir="android/app/src/main/res/mipmap-$density"
+                convert public/favicon.ico -resize "${icon_sz}x${icon_sz}" "$dir/ic_launcher.png"
+                convert public/favicon.ico -resize "${icon_sz}x${icon_sz}" "$dir/ic_launcher_round.png"
+                convert public/favicon.ico -resize "${fg_inner}x${fg_inner}" -background "#ffffff" -gravity center -extent "${fg_sz}x${fg_sz}" "$dir/ic_launcher_foreground.png"
+              done
+              for splash in android/app/src/main/res/drawable*/splash.png; do
+                dims=$(identify -format "%wx%h" "$splash")
+                w=${dims%x*}
+                h=${dims#*x}
+                min_dim=$(( w < h ? w : h ))
+                logo_sz=$(( min_dim * 45 / 100 ))
+                convert public/favicon.ico -resize "${logo_sz}x${logo_sz}" -background "#0F294A" -gravity center -extent "$dims" "$splash"
+              done
+            fi
+            sed -i 's|<string name="title_activity_main">.*</string>|<string name="title_activity_main">CBT KIR IPA SMAN 1 Sukabumi</string>|' android/app/src/main/res/values/strings.xml
+            if ! grep -q "ACCESS_NETWORK_STATE" android/app/src/main/AndroidManifest.xml; then
+              sed -i 's|<uses-permission android:name="android.permission.INTERNET" />|<uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />|' android/app/src/main/AndroidManifest.xml
+            fi
+          fi
+
+      - name: Sync Capacitor Android project
+        env:
+          CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || vars.CAPACITOR_SERVER_URL || 'https://ais-pre-zrwv5jm7eg77wohqqgp37g-187876417707.asia-northeast1.run.app' }}
+        run: npx cap sync android
+
+      - name: Grant execute permission for Gradle
+        run: chmod +x android/gradlew
+
+      - name: Build Debug APK (Siap Install)
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Package APK with clean filename
+        run: |
+          mkdir -p release-apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk release-apk/CBT-KIR-IPA-SMAN1-Sukabumi.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CBT-KIR-IPA-SMAN1-Sukabumi-APK
+          path: release-apk/CBT-KIR-IPA-SMAN1-Sukabumi.apk
+          retention-days: 90
+
+      - name: Publish Direct Download Link in GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'apk-latest' }}
+          name: 'CBT KIR IPA SMAN 1 Sukabumi (Android APK)'
+          body: |
+            File APK resmi **CBT KIR IPA SMAN 1 Sukabumi** yang terhubung ke server CBT aktif.
+
+            **Cara Install di Android:**
+            1. Unduh file `CBT-KIR-IPA-SMAN1-Sukabumi.apk` di bawah ini.
+            2. Buka file `.apk`, izinkan instalasi dari sumber ini bila diminta, lalu pilih **Install**.
+          files: release-apk/CBT-KIR-IPA-SMAN1-Sukabumi.apk
+          overwrite: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

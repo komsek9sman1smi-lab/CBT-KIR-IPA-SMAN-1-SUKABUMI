@@ -12,6 +12,7 @@ import {
 import {
   createBackupSnapshot,
   createNotification,
+  ensureDefaultReportTemplates,
   getDb,
   getSettingsMap,
   logAudit,
@@ -28,9 +29,22 @@ import {
   safeJsonParse,
   sanitizeRichHtml,
 } from '../shared/grading.ts';
+import {
+  buildQuestionDedupeKey,
+  normalizeQuestionTypeAlias,
+  isValidImageReference,
+} from '../shared/spreadsheet.ts';
+import {
+  buildDefaultWinnerRows,
+  computeDocumentVariables,
+  sanitizeLogoUrl,
+} from '../shared/documentTemplates.ts';
 import type {
+  DocumentCategory,
+  DocumentContentPayload,
   ExamRecord,
   ExamSettings,
+  ImportErrorDetail,
   QuestionOptionsPayload,
   QuestionRecord,
   UserRecord,
@@ -888,29 +902,48 @@ export function createApiRouter() {
     const db = getDb();
     const rows = Array.isArray(req.body?.users) ? req.body.users : [];
     let imported = 0;
-    const errors: string[] = [];
+    let skipped_duplicates = 0;
+    const errors: ImportErrorDetail[] = [];
+    const seenInBatch = new Set<string>();
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i] ?? {};
+      const rowNum = Number(r._rowNumber ?? i + 1);
       const username = String(r.username ?? '').trim().toLowerCase();
       const nama = String(r.nama ?? '').trim();
       const kelas = String(r.kelas ?? '').trim();
-      const password = String(r.password ?? 'SiswaKir2026!').trim();
-      const role = req.authUser!.role === 'PROFESSOR' ? 'SISWA' : String(r.role ?? 'SISWA').toUpperCase();
+      const rawPassword = String(r.password ?? '').trim();
+      const password = rawPassword || 'SiswaKir2026!';
+      const role = req.authUser!.role === 'PROFESSOR' ? 'SISWA' : String(r.role || 'SISWA').trim().toUpperCase();
 
       if (!username || !nama) {
-        errors.push(`Baris ${i + 1}: username dan nama wajib diisi.`);
+        errors.push({ row: rowNum, identifier: username || nama, reason: 'Username dan nama lengkap wajib diisi.' });
+        continue;
+      }
+      if (!/^[a-z0-9._-]+$/.test(username)) {
+        errors.push({ row: rowNum, identifier: username, reason: `Format username "${username}" tidak valid.` });
+        continue;
+      }
+      if (password.length < 6) {
+        errors.push({ row: rowNum, identifier: username, reason: 'Password minimal 6 karakter.' });
         continue;
       }
       if (!['SUPER_ADMIN', 'PROFESSOR', 'SISWA'].includes(role)) {
-        errors.push(`Baris ${i + 1}: role "${role}" tidak valid.`);
+        errors.push({ row: rowNum, identifier: username, reason: `Role "${role}" tidak valid.` });
         continue;
       }
+      if (seenInBatch.has(username)) {
+        skipped_duplicates++;
+        continue;
+      }
+      seenInBatch.add(username);
+
       const exists = db.prepare('SELECT user_id FROM USERS WHERE lower(username) = ?').get(username);
       if (exists) {
-        errors.push(`Baris ${i + 1}: username "${username}" sudah ada.`);
+        skipped_duplicates++;
         continue;
       }
+
       const { hash, salt } = hashPassword(password);
       db.prepare(
         'INSERT INTO USERS (user_id, username, password_hash, password_salt, nama, kelas, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -918,8 +951,17 @@ export function createApiRouter() {
       imported++;
     }
 
-    logAudit(db, req.authUser!.user_id, 'USER_IMPORT', { imported, errors_count: errors.length });
-    res.json({ imported, errors });
+    logAudit(db, req.authUser!.user_id, 'USER_IMPORT', {
+      imported,
+      skipped_duplicates,
+      failed_count: errors.length,
+    });
+    res.json({
+      imported,
+      skipped_duplicates,
+      failed_count: errors.length,
+      errors,
+    });
   });
 
   // 6. Categories & Question Bank
@@ -1130,83 +1172,162 @@ export function createApiRouter() {
   router.post('/questions/import', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
     const db = getDb();
     const rows = Array.isArray(req.body?.questions) ? req.body.questions : [];
+    const skipDuplicates = req.body?.skip_duplicates !== false;
     let imported = 0;
-    const failed: Array<{ row: number; reason: string }> = [];
-    const validTypes = ['PG', 'PGK', 'BENAR_SALAH', 'ESAI', 'ISIAN_SINGKAT', 'MENJODOHKAN', 'MENGURUTKAN'];
+    let skipped_duplicates = 0;
+    const errors: ImportErrorDetail[] = [];
+
+    const existingQuestions = db
+      .prepare('SELECT question_id, question_type, question_text FROM QUESTIONS')
+      .all() as Array<{ question_id: string; question_type: string; question_text: string }>;
+    const existingKeys = new Set(
+      existingQuestions.map((q) => buildQuestionDedupeKey(q.question_type, q.question_text)),
+    );
+    const seenInBatch = new Set<string>();
 
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i] ?? {};
-      const type = String(r.question_type ?? '').trim().toUpperCase();
-      const text = sanitizeRichHtml(String(r.question_text ?? '').trim());
-      const answer = String(r.correct_answer ?? '').trim();
+      const rowNum = Number(r._rowNumber ?? i + 1);
+      const parsedType = normalizeQuestionTypeAlias(String(r.question_type ?? ''));
+      const rawText = sanitizeRichHtml(String(r.question_text ?? '').trim());
+      const answerRaw = r.correct_answer;
 
-      if (!validTypes.includes(type)) {
-        failed.push({ row: i + 1, reason: `Jenis soal "${type}" tidak valid.` });
+      if (!parsedType) {
+        errors.push({ row: rowNum, reason: `Jenis soal "${String(r.question_type ?? '')}" tidak valid.` });
         continue;
       }
-      if (!text) {
-        failed.push({ row: i + 1, reason: 'Teks soal kosong.' });
+      if (!rawText) {
+        errors.push({ row: rowNum, reason: 'Teks soal kosong.' });
         continue;
       }
-      if (type !== 'ESAI' && !answer) {
-        failed.push({ row: i + 1, reason: 'Kunci jawaban wajib diisi untuk soal objektif.' });
+
+      const imageUrl = String(r.image_url ?? '').trim();
+      if (imageUrl && !isValidImageReference(imageUrl)) {
+        errors.push({ row: rowNum, reason: 'Format URL gambar tidak valid.' });
         continue;
       }
+
+      const dedupeKey = buildQuestionDedupeKey(parsedType, rawText);
+      if (seenInBatch.has(dedupeKey) || (skipDuplicates && existingKeys.has(dedupeKey))) {
+        skipped_duplicates++;
+        continue;
+      }
+      seenInBatch.add(dedupeKey);
 
       let optionsObj: QuestionOptionsPayload = {};
-      if (type === 'PG' || type === 'PGK') {
-        const choices = ['A', 'B', 'C', 'D', 'E']
-          .map((lbl) => ({
-            id: lbl,
-            label: lbl,
-            text: String(r[`option_${lbl.toLowerCase()}`] ?? '').trim(),
-          }))
-          .filter((c) => c.text.length > 0);
-        if (choices.length < 2) {
-          failed.push({ row: i + 1, reason: 'Minimal harus ada 2 pilihan jawaban (A dan B).' });
+      let formattedAnswer = '';
+
+      if (r.options && typeof r.options === 'object' && !Array.isArray(r.options)) {
+        optionsObj = r.options as QuestionOptionsPayload;
+        formattedAnswer = typeof answerRaw === 'string' ? answerRaw : JSON.stringify(answerRaw ?? '');
+      } else {
+        const answerStr = String(answerRaw ?? '').trim();
+        if (parsedType !== 'ESAI' && !answerStr) {
+          errors.push({ row: rowNum, reason: 'Kunci jawaban wajib diisi untuk soal objektif.' });
           continue;
         }
-        optionsObj = { choices, pgk_scoring: 'PARTIAL', pgk_penalty: 0 };
-      } else if (type === 'ISIAN_SINGKAT') {
-        optionsObj = {
-          accepted_answers: answer.split('|').map((s) => s.trim()).filter(Boolean),
-          case_sensitive: false,
-        };
+        if (parsedType === 'PG' || parsedType === 'PGK') {
+          const choices = ['A', 'B', 'C', 'D', 'E']
+            .map((lbl) => ({
+              id: lbl,
+              label: lbl,
+              text: String(r[`option_${lbl.toLowerCase()}`] ?? '').trim(),
+            }))
+            .filter((c) => c.text.length > 0);
+          if (choices.length < 2) {
+            errors.push({ row: rowNum, reason: 'Minimal harus ada 2 pilihan jawaban (A dan B).' });
+            continue;
+          }
+          optionsObj =
+            parsedType === 'PGK'
+              ? { choices, pgk_scoring: 'PARTIAL', pgk_penalty: 0 }
+              : { choices };
+          formattedAnswer =
+            parsedType === 'PGK'
+              ? JSON.stringify(
+                  answerStr
+                    .split(/[,|;]/)
+                    .map((s) => s.trim().toUpperCase())
+                    .filter(Boolean),
+                )
+              : answerStr.toUpperCase();
+        } else if (parsedType === 'ISIAN_SINGKAT') {
+          const variants = answerStr.split('|').map((s) => s.trim()).filter(Boolean);
+          optionsObj = { accepted_answers: variants, case_sensitive: false };
+          formattedAnswer = variants[0] || answerStr;
+        } else if (parsedType === 'MENJODOHKAN') {
+          const pairs = answerStr
+            .split('|')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((seg, idx) => {
+              const parts = seg.split(/=>|->|:/);
+              return parts.length >= 2
+                ? { id: `p${idx + 1}`, left: parts[0].trim(), right: parts.slice(1).join(':').trim() }
+                : null;
+            })
+            .filter((x): x is { id: string; left: string; right: string } => Boolean(x && x.left && x.right));
+          if (pairs.length < 2) {
+            errors.push({ row: rowNum, reason: 'Menjodohkan butuh minimal 2 pasangan (Kiri=>Kanan).' });
+            continue;
+          }
+          optionsObj = { matching_pairs: pairs };
+          const ansMap: Record<string, string> = {};
+          pairs.forEach((p) => {
+            ansMap[p.id] = p.right;
+          });
+          formattedAnswer = JSON.stringify(ansMap);
+        } else if (parsedType === 'MENGURUTKAN') {
+          const items = answerStr.split('|').map((s) => s.trim()).filter(Boolean);
+          if (items.length < 2) {
+            errors.push({ row: rowNum, reason: 'Mengurutkan butuh minimal 2 item dipisahkan |.' });
+            continue;
+          }
+          const orderingItems = items.map((text, idx) => ({ id: `ord_${idx + 1}`, text }));
+          optionsObj = { ordering_items: orderingItems };
+          formattedAnswer = JSON.stringify(orderingItems.map((it) => it.id));
+        } else {
+          formattedAnswer = answerStr;
+        }
       }
 
-      const formattedAnswer =
-        type === 'PGK'
-          ? JSON.stringify(
-              answer
-                .split(/[,|;]/)
-                .map((s) => s.trim().toUpperCase())
-                .filter(Boolean),
-            )
-          : answer;
+      const rawDiff = String(r.difficulty ?? 'SEDANG').trim().toUpperCase();
+      const difficulty = ['MUDAH', 'SEDANG', 'SULIT', 'OLIMPIADE'].includes(rawDiff) ? rawDiff : 'SEDANG';
 
       db.prepare(
         `INSERT INTO QUESTIONS (question_id, question_type, question_text, options_json, correct_answer, explanation, image_url, category, materi, difficulty, score, created_by, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         uid('q'),
-        type,
-        text,
+        parsedType,
+        rawText,
         JSON.stringify(optionsObj),
         formattedAnswer,
         sanitizeRichHtml(String(r.explanation ?? '')),
-        '',
-        String(r.category ?? 'Umum'),
-        String(r.materi ?? ''),
-        String(r.difficulty ?? 'SEDANG').toUpperCase(),
+        imageUrl,
+        String(r.category ?? '').trim() || 'Umum',
+        String(r.materi ?? '').trim(),
+        difficulty,
         Number(r.score ?? 10) || 10,
         req.authUser!.user_id,
         nowIso(),
       );
+      existingKeys.add(dedupeKey);
       imported++;
     }
 
-    logAudit(db, req.authUser!.user_id, 'QUESTION_IMPORT', { imported, failed_count: failed.length });
-    res.json({ imported, failed });
+    logAudit(db, req.authUser!.user_id, 'QUESTION_IMPORT', {
+      imported,
+      skipped_duplicates,
+      failed_count: errors.length,
+    });
+    res.json({
+      imported,
+      skipped_duplicates,
+      failed_count: errors.length,
+      failed: errors,
+      errors,
+    });
   });
 
   router.delete('/questions/:questionId', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
@@ -1544,6 +1665,277 @@ export function createApiRouter() {
       count: userIds.length,
     });
     res.json({ ok: true });
+  });
+
+  // Bulk Import Questions directly into a specific Exam (deduplicating Bank Soal & EXAM_QUESTIONS)
+  router.post('/exams/:examId/questions/import', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const exam = db.prepare('SELECT * FROM EXAMS WHERE exam_id = ?').get(req.params.examId) as ExamRecord | undefined;
+    if (!exam) {
+      res.status(404).json({ error: 'Ujian tidak ditemukan.' });
+      return;
+    }
+    if (req.authUser!.role === 'PROFESSOR' && !canProfessorAccessAll(db) && exam.created_by !== req.authUser!.user_id) {
+      res.status(403).json({ error: 'Anda tidak berwenang mengubah ujian milik Professor lain.' });
+      return;
+    }
+
+    const rows = Array.isArray(req.body?.questions) ? req.body.questions : [];
+    const existingBank = db
+      .prepare('SELECT question_id, question_type, question_text, score FROM QUESTIONS')
+      .all() as Array<{ question_id: string; question_type: string; question_text: string; score: number }>;
+    const bankByKey = new Map<string, { question_id: string; score: number }>();
+    for (const bq of existingBank) {
+      bankByKey.set(buildQuestionDedupeKey(bq.question_type, bq.question_text), {
+        question_id: bq.question_id,
+        score: bq.score,
+      });
+    }
+
+    const currentExamLinks = db
+      .prepare('SELECT question_id, question_order FROM EXAM_QUESTIONS WHERE exam_id = ?')
+      .all(exam.exam_id) as Array<{ question_id: string; question_order: number }>;
+    const linkedQIds = new Set(currentExamLinks.map((l) => l.question_id));
+    let nextOrder = currentExamLinks.reduce((m, l) => Math.max(m, l.question_order), 0) + 1;
+
+    let imported = 0;
+    let linked = 0;
+    let skipped_duplicates = 0;
+    const errors: ImportErrorDetail[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] ?? {};
+      const rowNum = Number(r._rowNumber ?? i + 1);
+      const qType = normalizeQuestionTypeAlias(String(r.question_type ?? ''));
+      const qText = sanitizeRichHtml(String(r.question_text ?? '').trim());
+
+      if (!qType) {
+        errors.push({ row: rowNum, reason: `Jenis soal "${String(r.question_type ?? '')}" tidak valid.` });
+        continue;
+      }
+      if (!qText) {
+        errors.push({ row: rowNum, reason: 'Teks pertanyaan kosong.' });
+        continue;
+      }
+
+      const key = buildQuestionDedupeKey(qType, qText);
+      const rowScore = Number(r.score ?? 10) || 10;
+      let targetQuestionId: string | null = null;
+
+      if (bankByKey.has(key)) {
+        const existingQ = bankByKey.get(key)!;
+        targetQuestionId = existingQ.question_id;
+        if (linkedQIds.has(targetQuestionId)) {
+          skipped_duplicates++;
+          continue;
+        }
+        linked++;
+      } else {
+        const answerStr =
+          typeof r.correct_answer === 'string'
+            ? r.correct_answer.trim()
+            : JSON.stringify(r.correct_answer ?? '');
+        if (qType !== 'ESAI' && !answerStr) {
+          errors.push({ row: rowNum, reason: 'Kunci jawaban wajib diisi untuk soal objektif.' });
+          continue;
+        }
+        let optionsObj: QuestionOptionsPayload =
+          r.options && typeof r.options === 'object' ? (r.options as QuestionOptionsPayload) : {};
+        let formattedAnswer = answerStr;
+
+        if (!r.options) {
+          if (qType === 'PG' || qType === 'PGK') {
+            const choices = ['A', 'B', 'C', 'D', 'E']
+              .map((lbl) => ({ id: lbl, label: lbl, text: String(r[`option_${lbl.toLowerCase()}`] ?? '').trim() }))
+              .filter((c) => c.text.length > 0);
+            if (choices.length < 2) {
+              errors.push({ row: rowNum, reason: 'PG/PGK butuh minimal 2 opsi (A dan B).' });
+              continue;
+            }
+            optionsObj = qType === 'PGK' ? { choices, pgk_scoring: 'PARTIAL', pgk_penalty: 0 } : { choices };
+            formattedAnswer =
+              qType === 'PGK'
+                ? JSON.stringify(answerStr.split(/[,|;]/).map((s: string) => s.trim().toUpperCase()).filter(Boolean))
+                : answerStr.toUpperCase();
+          } else if (qType === 'ISIAN_SINGKAT') {
+            const variants = answerStr.split('|').map((s: string) => s.trim()).filter(Boolean);
+            optionsObj = { accepted_answers: variants, case_sensitive: false };
+            formattedAnswer = variants[0] || answerStr;
+          } else if (qType === 'MENJODOHKAN') {
+            const pairs = answerStr
+              .split('|')
+              .map((s: string) => s.trim())
+              .filter(Boolean)
+              .map((seg: string, idx: number) => {
+                const parts = seg.split(/=>|->|:/);
+                return parts.length >= 2
+                  ? { id: `p${idx + 1}`, left: parts[0].trim(), right: parts.slice(1).join(':').trim() }
+                  : null;
+              })
+              .filter((x: { id: string; left: string; right: string } | null): x is { id: string; left: string; right: string } => Boolean(x && x.left && x.right));
+            if (pairs.length < 2) {
+              errors.push({ row: rowNum, reason: 'Menjodohkan butuh minimal 2 pasangan.' });
+              continue;
+            }
+            optionsObj = { matching_pairs: pairs };
+            const ansMap: Record<string, string> = {};
+            pairs.forEach((p: { id: string; right: string }) => { ansMap[p.id] = p.right; });
+            formattedAnswer = JSON.stringify(ansMap);
+          } else if (qType === 'MENGURUTKAN') {
+            const items = answerStr.split('|').map((s: string) => s.trim()).filter(Boolean);
+            if (items.length < 2) {
+              errors.push({ row: rowNum, reason: 'Mengurutkan butuh minimal 2 item dipisahkan |.' });
+              continue;
+            }
+            const ord = items.map((text: string, idx: number) => ({ id: `ord_${idx + 1}`, text }));
+            optionsObj = { ordering_items: ord };
+            formattedAnswer = JSON.stringify(ord.map((it: { id: string }) => it.id));
+          }
+        }
+
+        const newQId = uid('q');
+        const imageUrl = isValidImageReference(String(r.image_url ?? '')) ? String(r.image_url ?? '').trim() : '';
+        const rawDiff = String(r.difficulty ?? 'SEDANG').trim().toUpperCase();
+        const difficulty = ['MUDAH', 'SEDANG', 'SULIT', 'OLIMPIADE'].includes(rawDiff) ? rawDiff : 'SEDANG';
+
+        db.prepare(
+          `INSERT INTO QUESTIONS (question_id, question_type, question_text, options_json, correct_answer, explanation, image_url, category, materi, difficulty, score, created_by, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          newQId,
+          qType,
+          qText,
+          JSON.stringify(optionsObj),
+          formattedAnswer,
+          sanitizeRichHtml(String(r.explanation ?? '')),
+          imageUrl,
+          String(r.category ?? '').trim() || 'Umum',
+          String(r.materi ?? '').trim(),
+          difficulty,
+          rowScore,
+          req.authUser!.user_id,
+          nowIso(),
+        );
+        targetQuestionId = newQId;
+        bankByKey.set(key, { question_id: newQId, score: rowScore });
+        imported++;
+      }
+
+      if (targetQuestionId && !linkedQIds.has(targetQuestionId)) {
+        db.prepare(
+          'INSERT OR IGNORE INTO EXAM_QUESTIONS (id, exam_id, question_id, question_order, score) VALUES (?, ?, ?, ?, ?)',
+        ).run(uid('eq'), exam.exam_id, targetQuestionId, nextOrder++, rowScore);
+        linkedQIds.add(targetQuestionId);
+      }
+    }
+
+    db.prepare('UPDATE EXAMS SET total_questions = ? WHERE exam_id = ?').run(linkedQIds.size, exam.exam_id);
+    logAudit(db, req.authUser!.user_id, 'EXAM_QUESTIONS_IMPORT', {
+      exam_id: exam.exam_id,
+      imported,
+      linked,
+      skipped_duplicates,
+      failed_count: errors.length,
+    });
+
+    res.json({
+      imported: imported + linked,
+      linked,
+      skipped_duplicates,
+      failed_count: errors.length,
+      errors,
+    });
+  });
+
+  // Bulk Import / Assign Participants directly into a specific Exam
+  router.post('/exams/:examId/participants/import', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const exam = db.prepare('SELECT * FROM EXAMS WHERE exam_id = ?').get(req.params.examId) as ExamRecord | undefined;
+    if (!exam) {
+      res.status(404).json({ error: 'Ujian tidak ditemukan.' });
+      return;
+    }
+
+    const rows = Array.isArray(req.body?.participants) ? req.body.participants : [];
+    const existingAssigned = new Set(
+      (db.prepare('SELECT user_id FROM EXAM_PARTICIPANTS WHERE exam_id = ?').all(exam.exam_id) as Array<{ user_id: string }>).map(
+        (x) => x.user_id,
+      ),
+    );
+    const seenUsernames = new Set<string>();
+    let imported = 0;
+    let linked = 0;
+    let skipped_duplicates = 0;
+    const errors: ImportErrorDetail[] = [];
+
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] ?? {};
+      const rowNum = Number(r._rowNumber ?? i + 1);
+      const username = String(r.username ?? '').trim().toLowerCase();
+      const nama = String(r.nama ?? '').trim();
+      const kelas = String(r.kelas ?? '').trim();
+      const password = String(r.password ?? '').trim() || 'SiswaKir2026!';
+
+      if (!username || !/^[a-z0-9._-]+$/.test(username)) {
+        errors.push({ row: rowNum, identifier: username, reason: 'Username/NIS tidak valid atau kosong.' });
+        continue;
+      }
+      if (seenUsernames.has(username)) {
+        skipped_duplicates++;
+        continue;
+      }
+      seenUsernames.add(username);
+
+      const userRow = db
+        .prepare('SELECT user_id, role FROM USERS WHERE lower(username) = ?')
+        .get(username) as { user_id: string; role: string } | undefined;
+
+      let targetUserId: string;
+      if (userRow) {
+        if (existingAssigned.has(userRow.user_id)) {
+          skipped_duplicates++;
+          continue;
+        }
+        targetUserId = userRow.user_id;
+        linked++;
+      } else {
+        if (!nama) {
+          errors.push({
+            row: rowNum,
+            identifier: username,
+            reason: `Akun "${username}" belum terdaftar dan Nama Lengkap kosong.`,
+          });
+          continue;
+        }
+        const { hash, salt } = hashPassword(password);
+        targetUserId = uid('usr');
+        db.prepare(
+          'INSERT INTO USERS (user_id, username, password_hash, password_salt, nama, kelas, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        ).run(targetUserId, username, hash, salt, nama, kelas, 'SISWA', 'ACTIVE', nowIso());
+        imported++;
+      }
+
+      db.prepare(
+        "INSERT OR IGNORE INTO EXAM_PARTICIPANTS (id, exam_id, user_id, status, started_at, submitted_at, score, session_id) VALUES (?, ?, ?, 'BELUM_MULAI', '', '', 0, '')",
+      ).run(uid('prt'), exam.exam_id, targetUserId);
+      existingAssigned.add(targetUserId);
+    }
+
+    logAudit(db, req.authUser!.user_id, 'EXAM_PARTICIPANTS_IMPORT', {
+      exam_id: exam.exam_id,
+      imported,
+      linked,
+      skipped_duplicates,
+      failed_count: errors.length,
+    });
+
+    res.json({
+      imported: imported + linked,
+      linked,
+      skipped_duplicates,
+      failed_count: errors.length,
+      errors,
+    });
   });
 
   // 8. CBT Exam Runner (Student Endpoints — ZERO Answer Key Leakage!)
@@ -2330,6 +2722,566 @@ export function createApiRouter() {
         generated_at: nowIso(),
       },
     });
+  });
+
+  // 13B. Rekapitulasi Jawaban Peserta per Soal, Rekap Semua Ujian, & Live Document Context
+  router.get('/reports/all-results', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const globalAccess = req.authUser!.role === 'SUPER_ADMIN' || canProfessorAccessAll(db);
+    let sql = `
+      SELECT r.*, e.title as exam_title, e.subject as exam_subject, e.start_time,
+             u.username, u.nama, u.kelas, ep.started_at, ep.submitted_at, ep.status as participant_status,
+             COALESCE((SELECT SUM(score) FROM EXAM_QUESTIONS eq WHERE eq.exam_id = e.exam_id), 100) as max_score
+      FROM RESULTS r
+      JOIN EXAMS e ON e.exam_id = r.exam_id
+      JOIN USERS u ON u.user_id = r.user_id
+      LEFT JOIN EXAM_PARTICIPANTS ep ON ep.exam_id = r.exam_id AND ep.user_id = r.user_id
+      WHERE 1=1
+    `;
+    const params: string[] = [];
+    if (!globalAccess) {
+      sql += ' AND e.created_by = ?';
+      params.push(req.authUser!.user_id);
+    }
+    sql += ' ORDER BY e.start_time DESC, r.total_score DESC';
+    const rows = db.prepare(sql).all(...params);
+    res.json({ results: rows });
+  });
+
+  router.get('/reports/:examId/answers-recap', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req, res) => {
+    const db = getDb();
+    const exam = db.prepare('SELECT * FROM EXAMS WHERE exam_id = ?').get(req.params.examId) as ExamRecord | undefined;
+    if (!exam) {
+      res.status(404).json({ error: 'Ujian tidak ditemukan.' });
+      return;
+    }
+
+    const questions = db
+      .prepare(
+        `SELECT q.question_id, q.question_type, q.question_text, q.correct_answer, eq.question_order, eq.score as max_score
+         FROM EXAM_QUESTIONS eq
+         JOIN QUESTIONS q ON q.question_id = eq.question_id
+         WHERE eq.exam_id = ?
+         ORDER BY eq.question_order ASC`,
+      )
+      .all(exam.exam_id) as Array<{
+      question_id: string;
+      question_type: string;
+      question_text: string;
+      correct_answer: string;
+      question_order: number;
+      max_score: number;
+    }>;
+
+    const participants = db
+      .prepare(
+        `SELECT ep.user_id, ep.status as participant_status, ep.started_at, ep.submitted_at, ep.score as participant_score,
+                u.username, u.nama, u.kelas,
+                r.correct_count, r.incorrect_count, r.unanswered_count, r.total_score, r.published
+         FROM EXAM_PARTICIPANTS ep
+         JOIN USERS u ON u.user_id = ep.user_id
+         LEFT JOIN RESULTS r ON r.exam_id = ep.exam_id AND r.user_id = ep.user_id
+         WHERE ep.exam_id = ?
+         ORDER BY COALESCE(r.total_score, 0) DESC, u.nama ASC`,
+      )
+      .all(exam.exam_id) as Array<Record<string, unknown>>;
+
+    const answers = db
+      .prepare(
+        'SELECT user_id, question_id, answer_json, is_doubtful, saved_at, score FROM ANSWERS WHERE exam_id = ?',
+      )
+      .all(exam.exam_id) as Array<{
+      user_id: string;
+      question_id: string;
+      answer_json: string;
+      is_doubtful: number;
+      saved_at: string;
+      score: number;
+    }>;
+
+    const answerLookup = new Map<string, typeof answers[number]>();
+    for (const a of answers) {
+      answerLookup.set(`${a.user_id}:${a.question_id}`, a);
+    }
+
+    const recapRows: Array<Record<string, unknown>> = [];
+    for (const p of participants) {
+      for (const q of questions) {
+        const ans = answerLookup.get(`${String(p.user_id)}:${q.question_id}`);
+        const parsedVal = ans ? safeJsonParse<unknown>(ans.answer_json, null) : null;
+        const formattedAnswer =
+          parsedVal === null || parsedVal === undefined
+            ? ''
+            : Array.isArray(parsedVal)
+              ? parsedVal.join(', ')
+              : typeof parsedVal === 'object'
+                ? JSON.stringify(parsedVal)
+                : String(parsedVal);
+        recapRows.push({
+          user_id: p.user_id,
+          username: p.username,
+          nama: p.nama,
+          kelas: p.kelas,
+          participant_status: p.participant_status,
+          question_order: q.question_order,
+          question_id: q.question_id,
+          question_type: q.question_type,
+          question_text_plain: q.question_text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+          student_answer: formattedAnswer,
+          correct_answer: q.correct_answer,
+          earned_score: ans ? Number(ans.score) : 0,
+          max_score: Number(q.max_score),
+          is_doubtful: ans ? Boolean(ans.is_doubtful) : false,
+          saved_at: ans?.saved_at || '',
+        });
+      }
+    }
+
+    res.json({ exam, questions, participants, recap_rows: recapRows });
+  });
+
+  router.get('/reports/:examId/live-context', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req, res) => {
+    const db = getDb();
+    const exam = db.prepare('SELECT * FROM EXAMS WHERE exam_id = ?').get(req.params.examId) as ExamRecord | undefined;
+    if (!exam) {
+      res.status(404).json({ error: 'Ujian tidak ditemukan.' });
+      return;
+    }
+
+    const settings = getSettingsMap(db);
+    const examSettings = safeJsonParse<ExamSettings>(exam.settings_json, {} as ExamSettings);
+    const maxScoreRow = db
+      .prepare('SELECT COALESCE(SUM(score), 0) as max_score FROM EXAM_QUESTIONS WHERE exam_id = ?')
+      .get(exam.exam_id) as { max_score: number };
+    const maxScore = maxScoreRow.max_score || 100;
+
+    const participants = db
+      .prepare(
+        `SELECT ep.*, u.username, u.nama, u.kelas
+         FROM EXAM_PARTICIPANTS ep
+         JOIN USERS u ON u.user_id = ep.user_id
+         WHERE ep.exam_id = ?
+         ORDER BY u.nama ASC`,
+      )
+      .all(exam.exam_id) as Array<Record<string, unknown>>;
+
+    const results = db
+      .prepare(
+        `SELECT r.*, u.username, u.nama, u.kelas, ep.started_at, ep.submitted_at, ep.status as participant_status
+         FROM RESULTS r
+         JOIN USERS u ON u.user_id = r.user_id
+         LEFT JOIN EXAM_PARTICIPANTS ep ON ep.exam_id = r.exam_id AND ep.user_id = r.user_id
+         WHERE r.exam_id = ?
+         ORDER BY r.total_score DESC`,
+      )
+      .all(exam.exam_id) as Array<Record<string, unknown>>;
+
+    const violations = db
+      .prepare(
+        `SELECT v.*, u.nama, u.username, u.kelas
+         FROM VIOLATION_LOGS v
+         JOIN USERS u ON u.user_id = v.user_id
+         WHERE v.exam_id = ?
+         ORDER BY v.event_time DESC`,
+      )
+      .all(exam.exam_id) as Array<Record<string, unknown>>;
+
+    const violationSummary = db
+      .prepare('SELECT event_type, COUNT(*) as count FROM VIOLATION_LOGS WHERE exam_id = ? GROUP BY event_type')
+      .all(exam.exam_id) as Array<{ event_type: string; count: number }>;
+
+    const creator = db
+      .prepare('SELECT nama FROM USERS WHERE user_id = ?')
+      .get(exam.created_by) as { nama: string } | undefined;
+
+    const leaderboardEntries = results.map((r) => {
+      const durSec =
+        r.started_at && r.submitted_at
+          ? Math.max(1, Math.round((new Date(String(r.submitted_at)).getTime() - new Date(String(r.started_at)).getTime()) / 1000))
+          : exam.duration * 60;
+      const total = Number(r.total_score || 0);
+      return {
+        user_id: String(r.user_id),
+        nama: String(r.nama),
+        kelas: String(r.kelas || '—'),
+        total_score: Number(total.toFixed(2)),
+        max_score: maxScore,
+        percentage: Number(((total / maxScore) * 100).toFixed(1)),
+        duration_seconds: durSec,
+      };
+    });
+
+    const leaderboard = computeLeaderboardRanks(leaderboardEntries);
+    const passingGrade = Number(examSettings.passing_grade ?? 75);
+    const winners = buildDefaultWinnerRows(leaderboard, passingGrade);
+
+    const scores = results.map((r) => Number(r.total_score || 0));
+    const highestScore = scores.length > 0 ? Math.max(...scores) : 0;
+    const lowestScore = scores.length > 0 ? Math.min(...scores) : 0;
+    const averageScore = scores.length > 0 ? scores.reduce((a, b) => a + b, 0) / scores.length : 0;
+    const passedCount = leaderboard.filter((l) => l.percentage >= passingGrade).length;
+
+    const registeredCount = participants.length;
+    const completedCount = participants.filter((p) => p.status === 'TERKUMPUL' || p.status === 'DIHENTIKAN').length;
+    const attendedCount = participants.filter((p) => p.status !== 'BELUM_MULAI').length;
+    const absentCount = registeredCount - attendedCount;
+    const technicalIssuesCount = participants.filter((p) => p.status === 'GANGGUAN').length;
+
+    const variables = computeDocumentVariables({
+      exam,
+      settings,
+      registeredCount,
+      attendedCount,
+      absentCount,
+      completedCount,
+      technicalIssuesCount,
+      highestScore,
+      lowestScore,
+      averageScore,
+      passingGrade,
+      passedCount,
+      violationsCount: violations.length,
+      supervisorName: creator?.nama ?? 'Pembina KIR IPA',
+      winners,
+    });
+
+    res.json({
+      exam,
+      max_score: maxScore,
+      passing_grade: passingGrade,
+      settings,
+      variables,
+      summary: {
+        registered: registeredCount,
+        present: attendedCount,
+        absent: absentCount,
+        finished: completedCount,
+        technical_issues: technicalIssuesCount,
+        highest_score: Number(highestScore.toFixed(2)),
+        lowest_score: Number(lowestScore.toFixed(2)),
+        average_score: Number(averageScore.toFixed(2)),
+        passed_count: passedCount,
+        violations_count: violations.length,
+        violation_summary: violationSummary,
+        supervisor_name: creator?.nama ?? 'Pembina KIR IPA',
+      },
+      results,
+      leaderboard,
+      winners,
+      violations,
+      participants,
+    });
+  });
+
+  // 13C. Report Templates CRUD (Editable Report Format / Berita Acara / Pengumuman Pemenang)
+  function sanitizeDocumentPayload(rawPayload: unknown, fallbackSettings: ReturnType<typeof getSettingsMap>): string {
+    const p = (rawPayload && typeof rawPayload === 'object' ? rawPayload : {}) as Partial<DocumentContentPayload>;
+    const sanitizedSections = Array.isArray(p.sections)
+      ? p.sections.map((s) => ({
+          ...s,
+          title: String(s.title ?? ''),
+          content: sanitizeRichHtml(String(s.content ?? '')),
+          infoRows: Array.isArray(s.infoRows)
+            ? s.infoRows.map((row) => ({ label: String(row.label ?? ''), value: String(row.value ?? '') }))
+            : undefined,
+        }))
+      : [];
+
+    const cleaned: Partial<DocumentContentPayload> = {
+      ...p,
+      letterhead: p.letterhead
+        ? {
+            ...p.letterhead,
+            logoUrl: sanitizeLogoUrl(p.letterhead.logoUrl || fallbackSettings.logo_url),
+          }
+        : undefined,
+      sections: sanitizedSections,
+    };
+    return JSON.stringify(cleaned);
+  }
+
+  router.get('/report-templates', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req, res) => {
+    const db = getDb();
+    ensureDefaultReportTemplates(db, false);
+    const category = String(req.query.doc_category ?? '').trim();
+    let sql = 'SELECT * FROM REPORT_TEMPLATES WHERE 1=1';
+    const params: string[] = [];
+    if (category) {
+      sql += ' AND doc_category = ?';
+      params.push(category);
+    }
+    sql += ' ORDER BY is_default DESC, updated_at DESC';
+    const templates = db.prepare(sql).all(...params);
+    res.json({ templates });
+  });
+
+  router.post('/report-templates', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const b = req.body ?? {};
+    const name = String(b.name ?? '').trim();
+    const docCategory = String(b.doc_category ?? 'LAPORAN_HASIL') as DocumentCategory;
+    if (!name || !['LAPORAN_HASIL', 'BERITA_ACARA', 'PENGUMUMAN_PEMENANG'].includes(docCategory)) {
+      res.status(400).json({ error: 'Nama dan kategori template wajib valid.' });
+      return;
+    }
+
+    const templateId = uid('tpl');
+    const ts = nowIso();
+    const settings = getSettingsMap(db);
+    const contentJson = sanitizeDocumentPayload(
+      typeof b.content === 'string' ? safeJsonParse(b.content, {}) : b.content ?? safeJsonParse(b.content_json, {}),
+      settings,
+    );
+
+    db.prepare(
+      `INSERT INTO REPORT_TEMPLATES (template_id, name, doc_category, exam_id, is_default, content_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+    ).run(templateId, name, docCategory, String(b.exam_id ?? ''), contentJson, req.authUser!.user_id, ts, ts);
+
+    logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_CREATE', { template_id: templateId, name, doc_category: docCategory });
+    const created = db.prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?').get(templateId);
+    res.status(201).json({ template: created });
+  });
+
+  router.put('/report-templates/:templateId', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const existing = db
+      .prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?')
+      .get(req.params.templateId) as { template_id: string; name: string; exam_id: string; content_json: string } | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Template laporan tidak ditemukan.' });
+      return;
+    }
+    const b = req.body ?? {};
+    const settings = getSettingsMap(db);
+    const nextName = String(b.name ?? existing.name).trim() || existing.name;
+    const nextExamId = b.exam_id !== undefined ? String(b.exam_id) : existing.exam_id;
+    const nextContent =
+      b.content !== undefined || b.content_json !== undefined
+        ? sanitizeDocumentPayload(
+            typeof b.content === 'string'
+              ? safeJsonParse(b.content, {})
+              : b.content ?? safeJsonParse(b.content_json, {}),
+            settings,
+          )
+        : existing.content_json;
+
+    db.prepare(
+      'UPDATE REPORT_TEMPLATES SET name = ?, exam_id = ?, content_json = ?, updated_at = ? WHERE template_id = ?',
+    ).run(nextName, nextExamId, nextContent, nowIso(), existing.template_id);
+
+    logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_UPDATE', { template_id: existing.template_id, name: nextName });
+    const updated = db.prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?').get(existing.template_id);
+    res.json({ template: updated });
+  });
+
+  router.post('/report-templates/:templateId/duplicate', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const src = db
+      .prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?')
+      .get(req.params.templateId) as { template_id: string; name: string; doc_category: string; exam_id: string; content_json: string } | undefined;
+    if (!src) {
+      res.status(404).json({ error: 'Template sumber tidak ditemukan.' });
+      return;
+    }
+    const newId = uid('tpl');
+    const ts = nowIso();
+    const copyName = String(req.body?.name ?? `${src.name} (Salinan)`).trim();
+    db.prepare(
+      `INSERT INTO REPORT_TEMPLATES (template_id, name, doc_category, exam_id, is_default, content_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+    ).run(newId, copyName, src.doc_category, src.exam_id, src.content_json, req.authUser!.user_id, ts, ts);
+
+    logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_DUPLICATE', { source: src.template_id, target: newId });
+    const created = db.prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?').get(newId);
+    res.status(201).json({ template: created });
+  });
+
+  router.delete('/report-templates/:templateId', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const existing = db
+      .prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?')
+      .get(req.params.templateId) as { template_id: string; doc_category: string; is_default: number } | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Template tidak ditemukan.' });
+      return;
+    }
+    const countSameCategory = (
+      db
+        .prepare('SELECT COUNT(*) as c FROM REPORT_TEMPLATES WHERE doc_category = ?')
+        .get(existing.doc_category) as { c: number }
+    ).c;
+    if (countSameCategory <= 1) {
+      res.status(400).json({ error: 'Minimal harus tersisa satu template aktif untuk kategori ini.' });
+      return;
+    }
+    db.prepare('DELETE FROM REPORT_TEMPLATES WHERE template_id = ?').run(existing.template_id);
+    logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_DELETE', { template_id: existing.template_id });
+    res.json({ ok: true });
+  });
+
+  router.post('/report-templates/restore-defaults', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    ensureDefaultReportTemplates(db, true, req.authUser!.user_id);
+    logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATES_RESTORE_DEFAULT', {});
+    const templates = db.prepare('SELECT * FROM REPORT_TEMPLATES ORDER BY is_default DESC, updated_at DESC').all();
+    res.json({ ok: true, templates });
+  });
+
+  // 13D. Official Documents CRUD (Draft / Publish / History for Laporan, Berita Acara, Pengumuman Pemenang)
+  router.get('/official-documents', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req, res) => {
+    const db = getDb();
+    const examId = String(req.query.exam_id ?? '').trim();
+    const docCategory = String(req.query.doc_category ?? '').trim();
+    let sql = `
+      SELECT d.*, u.nama as creator_name
+      FROM OFFICIAL_DOCUMENTS d
+      LEFT JOIN USERS u ON u.user_id = d.created_by
+      WHERE 1=1
+    `;
+    const params: string[] = [];
+    if (examId) {
+      sql += ' AND d.exam_id = ?';
+      params.push(examId);
+    }
+    if (docCategory) {
+      sql += ' AND d.doc_category = ?';
+      params.push(docCategory);
+    }
+    sql += ' ORDER BY d.updated_at DESC';
+    const documents = db.prepare(sql).all(...params);
+    res.json({ documents });
+  });
+
+  router.post('/official-documents', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const b = req.body ?? {};
+    const docCategory = String(b.doc_category ?? 'BERITA_ACARA') as DocumentCategory;
+    const title = String(b.title ?? '').trim();
+    if (!title || !['LAPORAN_HASIL', 'BERITA_ACARA', 'PENGUMUMAN_PEMENANG'].includes(docCategory)) {
+      res.status(400).json({ error: 'Judul dan kategori dokumen wajib valid.' });
+      return;
+    }
+
+    const docId = uid('doc');
+    const ts = nowIso();
+    const status = b.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT';
+    const settings = getSettingsMap(db);
+    const contentJson = sanitizeDocumentPayload(
+      typeof b.content === 'string' ? safeJsonParse(b.content, {}) : b.content ?? safeJsonParse(b.content_json, {}),
+      settings,
+    );
+
+    db.prepare(
+      `INSERT INTO OFFICIAL_DOCUMENTS (doc_id, exam_id, template_id, doc_category, title, doc_number, status, content_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      docId,
+      String(b.exam_id ?? ''),
+      String(b.template_id ?? ''),
+      docCategory,
+      title,
+      String(b.doc_number ?? ''),
+      status,
+      contentJson,
+      req.authUser!.user_id,
+      ts,
+      ts,
+    );
+
+    logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_SAVE', {
+      doc_id: docId,
+      doc_category: docCategory,
+      status,
+      title,
+    });
+    const created = db.prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').get(docId);
+    res.status(201).json({ document: created });
+  });
+
+  router.put('/official-documents/:docId', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const existing = db
+      .prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?')
+      .get(req.params.docId) as { doc_id: string; title: string; doc_number: string; status: string; exam_id: string; template_id: string; content_json: string } | undefined;
+    if (!existing) {
+      res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+      return;
+    }
+    const b = req.body ?? {};
+    const settings = getSettingsMap(db);
+    const nextStatus = b.status === 'PUBLISHED' ? 'PUBLISHED' : b.status === 'DRAFT' ? 'DRAFT' : existing.status;
+    const nextContent =
+      b.content !== undefined || b.content_json !== undefined
+        ? sanitizeDocumentPayload(
+            typeof b.content === 'string'
+              ? safeJsonParse(b.content, {})
+              : b.content ?? safeJsonParse(b.content_json, {}),
+            settings,
+          )
+        : existing.content_json;
+
+    db.prepare(
+      `UPDATE OFFICIAL_DOCUMENTS
+       SET exam_id = ?, template_id = ?, title = ?, doc_number = ?, status = ?, content_json = ?, updated_at = ?
+       WHERE doc_id = ?`,
+    ).run(
+      b.exam_id !== undefined ? String(b.exam_id) : existing.exam_id,
+      b.template_id !== undefined ? String(b.template_id) : existing.template_id,
+      String(b.title ?? existing.title).trim() || existing.title,
+      b.doc_number !== undefined ? String(b.doc_number) : existing.doc_number,
+      nextStatus,
+      nextContent,
+      nowIso(),
+      existing.doc_id,
+    );
+
+    logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_UPDATE', { doc_id: existing.doc_id, status: nextStatus });
+    const updated = db.prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').get(existing.doc_id);
+    res.json({ document: updated });
+  });
+
+  router.post('/official-documents/:docId/duplicate', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const src = db
+      .prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?')
+      .get(req.params.docId) as { doc_id: string; exam_id: string; template_id: string; doc_category: string; title: string; doc_number: string; content_json: string } | undefined;
+    if (!src) {
+      res.status(404).json({ error: 'Dokumen sumber tidak ditemukan.' });
+      return;
+    }
+    const newId = uid('doc');
+    const ts = nowIso();
+    db.prepare(
+      `INSERT INTO OFFICIAL_DOCUMENTS (doc_id, exam_id, template_id, doc_category, title, doc_number, status, content_json, created_by, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?)`,
+    ).run(
+      newId,
+      src.exam_id,
+      src.template_id,
+      src.doc_category,
+      `${src.title} (Salinan)`,
+      src.doc_number,
+      src.content_json,
+      req.authUser!.user_id,
+      ts,
+      ts,
+    );
+    logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_DUPLICATE', { source: src.doc_id, target: newId });
+    const created = db.prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').get(newId);
+    res.status(201).json({ document: created });
+  });
+
+  router.delete('/official-documents/:docId', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const existing = db.prepare('SELECT doc_id FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').get(req.params.docId);
+    if (!existing) {
+      res.status(404).json({ error: 'Dokumen tidak ditemukan.' });
+      return;
+    }
+    db.prepare('DELETE FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').run(req.params.docId);
+    logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_DELETE', { doc_id: req.params.docId });
+    res.json({ ok: true });
   });
 
   // 14. Super Admin: Audit Logs, Backups, App & Security Settings

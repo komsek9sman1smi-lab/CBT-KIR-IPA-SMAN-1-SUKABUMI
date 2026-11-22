@@ -2,18 +2,28 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   AlertCircle,
   Award,
-  CheckCircle2,
   Download,
   Edit,
   Eye,
   FileSpreadsheet,
+  Layers,
+  ListChecks,
   Printer,
+  Search,
+  X,
 } from 'lucide-react';
 import { AppLogo } from './AppLogo';
 import { ChartCanvas } from './ChartCanvas';
+import { OfficialDocumentStudio } from './OfficialDocumentStudio';
+import { PrintPreviewModal } from './PrintPreviewModal';
 import { RichMathRenderer } from './RichMathRenderer';
 import { apiFetch } from '../utils/api';
-import { exportRowsToCsv, exportRowsToExcel, exportTableToPdf } from '../utils/exporters';
+import {
+  exportMultiSheetExcel,
+  exportRowsToCsv,
+  exportRowsToExcel,
+  exportTableToPdf,
+} from '../utils/exporters';
 import { safeJsonParse, type ItemAnalysisResult, type RankedLeaderboardEntry } from '../shared/grading';
 import type { AppSettingsMap, ExamRecord, UserRecord } from '../shared/types';
 
@@ -33,6 +43,26 @@ export function ResultsManagementView({
   const [reason, setReason] = useState('');
   const [toast, setToast] = useState('');
 
+  const [kelasFilter, setKelasFilter] = useState('ALL');
+  const [search, setSearch] = useState('');
+  const [printOpen, setPrintOpen] = useState(false);
+  const [recapModalOpen, setRecapModalOpen] = useState(false);
+  const [recapLoading, setRecapLoading] = useState(false);
+  const [recapPrintOpen, setRecapPrintOpen] = useState(false);
+  const [recapData, setRecapData] = useState<{
+    exam: ExamRecord;
+    questions: Array<{
+      question_id: string;
+      question_type: string;
+      question_text: string;
+      correct_answer: string;
+      question_order: number;
+      max_score: number;
+    }>;
+    participants: Array<Record<string, unknown>>;
+    recap_rows: Array<Record<string, unknown>>;
+  } | null>(null);
+
   useEffect(() => {
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
       setExams(res.exams);
@@ -47,14 +77,40 @@ export function ResultsManagementView({
       `/results/${examId}`,
     );
     setResults(res.results);
-    setMaxScore(res.max_score);
+    setMaxScore(res.max_score || 100);
   };
 
   useEffect(() => {
-    if (selectedExamId) void loadResults(selectedExamId);
+    if (selectedExamId) {
+      setKelasFilter('ALL');
+      setSearch('');
+      void loadResults(selectedExamId);
+    }
   }, [selectedExamId]);
 
   const selectedExam = exams.find((e) => e.exam_id === selectedExamId);
+  const uniqueClasses = useMemo(
+    () =>
+      Array.from(new Set(results.map((r) => String(r.kelas || '').trim()).filter(Boolean))).sort(),
+    [results],
+  );
+
+  const filteredResults = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return results.filter((r) => {
+      const kelas = String(r.kelas || '').trim();
+      if (kelasFilter !== 'ALL' && kelas !== kelasFilter) return false;
+      if (q) {
+        const match =
+          String(r.nama || '').toLowerCase().includes(q) ||
+          String(r.username || '').toLowerCase().includes(q) ||
+          kelas.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [results, kelasFilter, search]);
+
   const allPublished = results.length > 0 && results.every((r) => Number(r.published) === 1);
 
   const handleTogglePublish = async () => {
@@ -85,20 +141,156 @@ export function ResultsManagementView({
     await loadResults(selectedExamId);
   };
 
-  const exportExcel = () => {
-    const rows = results.map((r, i) => ({
+  const mapResultRows = (list: Array<Record<string, unknown>>) =>
+    list.map((r, i) => ({
       No: i + 1,
-      Username: r.username,
-      Nama: r.nama,
-      Kelas: r.kelas,
-      Benar: r.correct_count,
-      Salah: r.incorrect_count,
-      Kosong: r.unanswered_count,
-      Nilai_Akhir: r.total_score,
-      Persentase: `${((Number(r.total_score) / maxScore) * 100).toFixed(1)}%`,
-      Dipublikasikan: Number(r.published) === 1 ? 'Ya' : 'Belum',
+      Username: String(r.username || ''),
+      Nama: String(r.nama || ''),
+      Kelas: String(r.kelas || '—'),
+      Benar: Number(r.correct_count || 0),
+      Salah: Number(r.incorrect_count || 0),
+      Kosong: Number(r.unanswered_count || 0),
+      Nilai_Akhir: Number(r.total_score || 0),
+      Skor_Maksimal: maxScore,
+      Persentase: `${((Number(r.total_score || 0) / (maxScore || 100)) * 100).toFixed(1)}%`,
+      Publikasi: Number(r.published) === 1 ? 'Terpublikasi' : 'Draft',
+      Waktu_Nilai: r.graded_at ? new Date(String(r.graded_at)).toLocaleString('id-ID') : '—',
     }));
-    exportRowsToExcel(`Hasil_Ujian_${selectedExamId}.xlsx`, 'Hasil_Ujian', rows);
+
+  const exportExcel = () => {
+    exportRowsToExcel(
+      `Hasil_Ujian_${selectedExamId}.xlsx`,
+      'Hasil_Ujian',
+      mapResultRows(filteredResults),
+    );
+  };
+
+  const exportCsv = () => {
+    exportRowsToCsv(`Hasil_Ujian_${selectedExamId}.csv`, mapResultRows(filteredResults));
+  };
+
+  const exportAllExamsExcel = async () => {
+    try {
+      const res = await apiFetch<{ results: Array<Record<string, unknown>> }>('/reports/all-results');
+      const allRows = res.results.map((r, i) => {
+        const mScore = Number(r.max_score || 100) || 100;
+        return {
+          No: i + 1,
+          Ujian: String(r.exam_title || ''),
+          Mata_Pelajaran: String(r.exam_subject || ''),
+          Username: String(r.username || ''),
+          Nama_Peserta: String(r.nama || ''),
+          Kelas: String(r.kelas || '—'),
+          Benar: Number(r.correct_count || 0),
+          Salah: Number(r.incorrect_count || 0),
+          Kosong: Number(r.unanswered_count || 0),
+          Nilai_Akhir: Number(r.total_score || 0),
+          Skor_Maksimal: mScore,
+          Persentase: `${((Number(r.total_score || 0) / mScore) * 100).toFixed(1)}%`,
+          Status_Publikasi: Number(r.published) === 1 ? 'Terpublikasi' : 'Draft',
+        };
+      });
+
+      const examMap = new Map<string, { title: string; subject: string; scores: number[]; maxScore: number }>();
+      for (const r of res.results) {
+        const eid = String(r.exam_id || '');
+        if (!examMap.has(eid)) {
+          examMap.set(eid, {
+            title: String(r.exam_title || ''),
+            subject: String(r.exam_subject || ''),
+            scores: [],
+            maxScore: Number(r.max_score || 100) || 100,
+          });
+        }
+        examMap.get(eid)!.scores.push(Number(r.total_score || 0));
+      }
+
+      const summaryRows = Array.from(examMap.entries()).map(([, v], idx) => {
+        const sum = v.scores.reduce((a, b) => a + b, 0);
+        return {
+          No: idx + 1,
+          Judul_Ujian: v.title,
+          Mata_Pelajaran: v.subject,
+          Jumlah_Peserta: v.scores.length,
+          Skor_Maksimal: v.maxScore,
+          Nilai_Tertinggi: v.scores.length ? Math.max(...v.scores) : 0,
+          Nilai_Terendah: v.scores.length ? Math.min(...v.scores) : 0,
+          Rata_Rata: v.scores.length ? Number((sum / v.scores.length).toFixed(2)) : 0,
+        };
+      });
+
+      exportMultiSheetExcel('Rekap_Hasil_Seluruh_Ujian.xlsx', [
+        { name: 'Ringkasan_Ujian', rows: summaryRows },
+        { name: 'Seluruh_Nilai_Peserta', rows: allRows },
+      ]);
+      setToast('Ekspor Excel seluruh ujian (multi-sheet) berhasil diunduh.');
+      setTimeout(() => setToast(''), 3000);
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Gagal mengekspor seluruh hasil ujian.');
+      setTimeout(() => setToast(''), 3500);
+    }
+  };
+
+  const openAnswersRecap = async () => {
+    if (!selectedExamId) return;
+    setRecapModalOpen(true);
+    setRecapLoading(true);
+    try {
+      const data = await apiFetch<typeof recapData>(`/reports/${selectedExamId}/answers-recap`);
+      setRecapData(data);
+    } finally {
+      setRecapLoading(false);
+    }
+  };
+
+  const exportRecapExcel = () => {
+    if (!recapData) return;
+    const perQuestionRows = recapData.recap_rows.map((r, i) => ({
+      No: i + 1,
+      No_Soal: Number(r.question_order),
+      Tipe: String(r.question_type || ''),
+      Pertanyaan: String(r.question_text_plain || ''),
+      Username: String(r.username || ''),
+      Nama_Peserta: String(r.nama || ''),
+      Kelas: String(r.kelas || '—'),
+      Jawaban_Peserta: String(r.student_answer || '—'),
+      Kunci_Jawaban: String(r.correct_answer || ''),
+      Skor_Diperoleh: Number(r.earned_score || 0),
+      Skor_Maksimal: Number(r.max_score || 0),
+      Ragu_Ragu: r.is_doubtful ? 'Ya' : 'Tidak',
+    }));
+
+    const participantSummary = recapData.participants.map((p, i) => ({
+      No: i + 1,
+      Username: String(p.username || ''),
+      Nama_Peserta: String(p.nama || ''),
+      Kelas: String(p.kelas || '—'),
+      Status: String(p.participant_status || ''),
+      Benar: Number(p.correct_count ?? 0),
+      Salah: Number(p.incorrect_count ?? 0),
+      Kosong: Number(p.unanswered_count ?? 0),
+      Nilai_Akhir: Number(p.total_score ?? p.participant_score ?? 0),
+    }));
+
+    exportMultiSheetExcel(`Rekap_Jawaban_${selectedExamId}.xlsx`, [
+      { name: 'Rekap_Per_Soal', rows: perQuestionRows },
+      { name: 'Ringkasan_Nilai', rows: participantSummary },
+    ]);
+  };
+
+  const exportRecapCsv = () => {
+    if (!recapData) return;
+    const rows = recapData.recap_rows.map((r, i) => ({
+      No: i + 1,
+      No_Soal: Number(r.question_order),
+      Tipe: String(r.question_type || ''),
+      Nama_Peserta: String(r.nama || ''),
+      Kelas: String(r.kelas || '—'),
+      Jawaban_Peserta: String(r.student_answer || '—'),
+      Kunci_Jawaban: String(r.correct_answer || ''),
+      Skor: `${Number(r.earned_score || 0)}/${Number(r.max_score || 0)}`,
+    }));
+    exportRowsToCsv(`Rekap_Jawaban_${selectedExamId}.csv`, rows);
   };
 
   const exportPdf = () => {
@@ -108,22 +300,40 @@ export function ResultsManagementView({
         appName: config.app_name || 'CBT KIR IPA SMAN 1 SUKABUMI',
         orgName: config.org_name || 'KIR IPA',
         schoolName: config.school_name || 'SMAN 1 Sukabumi',
-        title: `Rekap Hasil Ujian: ${selectedExam?.title || ''}`,
+        title: `Daftar Nilai Peserta: ${selectedExam?.title || ''}`,
         activityName: selectedExam?.subject || 'Evaluasi Akademik',
         authorName: currentUser.nama,
       },
-      ['No', 'Nama Peserta', 'Kelas', 'Benar', 'Salah', 'Skor', 'Status'],
-      results.map((r, i) => [
+      ['No', 'Nama Peserta', 'Kelas', 'Benar', 'Salah', 'Kosong', 'Nilai', 'Status'],
+      filteredResults.map((r, i) => [
         i + 1,
         String(r.nama),
-        String(r.kelas),
+        String(r.kelas || '—'),
         Number(r.correct_count),
         Number(r.incorrect_count),
+        Number(r.unanswered_count),
         `${r.total_score}/${maxScore}`,
         Number(r.published) === 1 ? 'Terpublikasi' : 'Draft',
       ]),
     );
   };
+
+  const printRows = filteredResults.map((r, i) => ({
+    no: i + 1,
+    username: String(r.username || ''),
+    nama: String(r.nama || ''),
+    kelas: String(r.kelas || '—'),
+    bsk: `${Number(r.correct_count || 0)} / ${Number(r.incorrect_count || 0)} / ${Number(r.unanswered_count || 0)}`,
+    nilai: `${Number(r.total_score || 0)} / ${maxScore}`,
+    persen: `${((Number(r.total_score || 0) / (maxScore || 100)) * 100).toFixed(1)}%`,
+    publikasi: Number(r.published) === 1 ? 'Terpublikasi' : 'Draft',
+  }));
+
+  const avgFiltered = useMemo(() => {
+    if (filteredResults.length === 0) return 0;
+    const sum = filteredResults.reduce((s, r) => s + Number(r.total_score || 0), 0);
+    return Number((sum / filteredResults.length).toFixed(2));
+  }, [filteredResults]);
 
   return (
     <div className="space-y-4">
@@ -133,37 +343,48 @@ export function ResultsManagementView({
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
-        <select
-          aria-label="Pilih ujian"
-          value={selectedExamId}
-          onChange={(e) => setSelectedExamId(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[260px]"
-        >
-          {exams.map((e) => (
-            <option key={e.exam_id} value={e.exam_id}>
-              {e.title} ({e.status})
-            </option>
-          ))}
-        </select>
+      <div className="bg-white border border-slate-200 rounded-xl p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1">
+            <select
+              aria-label="Pilih ujian"
+              value={selectedExamId}
+              onChange={(e) => setSelectedExamId(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[240px]"
+            >
+              {exams.map((e) => (
+                <option key={e.exam_id} value={e.exam_id}>
+                  {e.title} ({e.status})
+                </option>
+              ))}
+            </select>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={exportExcel}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Excel
-          </button>
-          <button
-            type="button"
-            onClick={exportPdf}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            PDF
-          </button>
+            <div className="relative min-w-[200px]">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Cari peserta / username..."
+                className="w-full pl-9 pr-3 py-2 rounded-lg border border-slate-300 text-xs"
+              />
+            </div>
+
+            <select
+              aria-label="Filter kelas hasil ujian"
+              value={kelasFilter}
+              onChange={(e) => setKelasFilter(e.target.value)}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-xs bg-white"
+            >
+              <option value="ALL">Semua Kelas</option>
+              {uniqueClasses.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             type="button"
             onClick={handleTogglePublish}
@@ -173,6 +394,65 @@ export function ResultsManagementView({
           >
             {allPublished ? 'Tarik Publikasi Nilai' : 'Publikasikan Nilai ke Siswa'}
           </button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-100">
+          <div className="text-xs text-slate-500">
+            Menampilkan <strong className="text-slate-900">{filteredResults.length}</strong> dari{' '}
+            <strong>{results.length}</strong> peserta · Rata-rata tampil:{' '}
+            <strong className="font-mono text-[#0F294A]">{avgFiltered}</strong>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={openAnswersRecap}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-[#0F294A] hover:bg-blue-100 cursor-pointer"
+            >
+              <ListChecks className="w-3.5 h-3.5" />
+              Rekapitulasi Jawaban
+            </button>
+            <button
+              type="button"
+              onClick={exportExcel}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              Ekspor Excel
+            </button>
+            <button
+              type="button"
+              onClick={exportAllExamsExcel}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+              title="Ekspor gabungan seluruh ujian dalam 1 file Excel multi-sheet"
+            >
+              <Layers className="w-3.5 h-3.5 text-blue-700" />
+              Ekspor Semua Ujian
+            </button>
+            <button
+              type="button"
+              onClick={exportCsv}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Ekspor CSV
+            </button>
+            <button
+              type="button"
+              onClick={exportPdf}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => setPrintOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F294A] text-white text-xs font-semibold hover:bg-blue-800 cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              Cetak Daftar Nilai
+            </button>
+          </div>
         </div>
       </div>
 
@@ -191,16 +471,21 @@ export function ResultsManagementView({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {results.length === 0 ? (
+              {filteredResults.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
-                    Belum ada hasil peserta yang dikumpulkan pada ujian ini.
+                    {results.length === 0
+                      ? 'Belum ada hasil peserta yang dikumpulkan pada ujian ini.'
+                      : 'Tidak ada data nilai peserta yang cocok dengan filter aktif.'}
                   </td>
                 </tr>
               ) : (
-                results.map((r) => (
+                filteredResults.map((r) => (
                   <tr key={String(r.result_id)} className="hover:bg-slate-50/70">
-                    <td className="px-4 py-3 font-medium text-slate-900">{String(r.nama)}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-900">{String(r.nama)}</div>
+                      <div className="text-[11px] font-mono text-slate-500">{String(r.username || '')}</div>
+                    </td>
                     <td className="px-4 py-3 text-xs text-slate-600">{String(r.kelas)}</td>
                     <td className="px-4 py-3 font-mono text-xs">
                       {Number(r.correct_count)} / {Number(r.incorrect_count)} / {Number(r.unanswered_count)}
@@ -290,15 +575,202 @@ export function ResultsManagementView({
           </div>
         </div>
       )}
+
+      {recapModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 flex items-center justify-center p-4">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-6xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 bg-slate-50">
+              <div>
+                <h3 className="text-base font-bold text-[#0F294A]">
+                  Rekapitulasi Jawaban Peserta per Soal
+                </h3>
+                <p className="text-xs text-slate-500">
+                  {selectedExam?.title} · {recapData?.questions.length || 0} butir soal ·{' '}
+                  {recapData?.participants.length || 0} peserta terdaftar
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={exportRecapExcel}
+                  disabled={!recapData}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                  Excel (Multi-Sheet)
+                </button>
+                <button
+                  type="button"
+                  onClick={exportRecapCsv}
+                  disabled={!recapData}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer disabled:opacity-50"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  CSV (UTF-8)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecapPrintOpen(true)}
+                  disabled={!recapData}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0F294A] text-white text-xs font-semibold hover:bg-blue-800 cursor-pointer disabled:opacity-50"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Cetak Rekap Jawaban
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecapModalOpen(false)}
+                  aria-label="Tutup rekap jawaban"
+                  className="p-1.5 rounded-lg border border-slate-300 bg-white text-slate-600 hover:bg-slate-100 cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-auto p-5">
+              {recapLoading ? (
+                <div className="py-12 text-center text-sm text-slate-500">
+                  Memuat rekapitulasi jawaban peserta...
+                </div>
+              ) : !recapData || recapData.recap_rows.length === 0 ? (
+                <div className="py-12 text-center text-sm text-slate-500">
+                  Belum ada peserta atau butir soal untuk direkap pada ujian ini.
+                </div>
+              ) : (
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-700 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2.5">Soal</th>
+                      <th className="px-3 py-2.5">Peserta & Kelas</th>
+                      <th className="px-3 py-2.5">Jawaban Peserta</th>
+                      <th className="px-3 py-2.5">Kunci</th>
+                      <th className="px-3 py-2.5">Skor</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {recapData.recap_rows.slice(0, 300).map((row, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50/70">
+                        <td className="px-3 py-2 align-top">
+                          <span className="font-mono font-bold text-[#0F294A]">
+                            #{String(row.question_order)}
+                          </span>{' '}
+                          <span className="text-[11px] text-slate-500">
+                            ({String(row.question_type)})
+                          </span>
+                          <div className="text-[11px] text-slate-600 line-clamp-1 max-w-xs">
+                            {String(row.question_text_plain || '')}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 align-top">
+                          <div className="font-medium text-slate-900">{String(row.nama)}</div>
+                          <div className="text-[11px] text-slate-500">{String(row.kelas || '—')}</div>
+                        </td>
+                        <td className="px-3 py-2 font-mono text-slate-800 align-top">
+                          {String(row.student_answer || '—')}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-emerald-700 align-top">
+                          {String(row.correct_answer || '—')}
+                        </td>
+                        <td className="px-3 py-2 font-mono font-semibold align-top">
+                          {Number(row.earned_score || 0)} / {Number(row.max_score || 0)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {recapData && recapData.recap_rows.length > 300 && (
+                <p className="text-[11px] text-slate-500 mt-3">
+                  Pratinjau tabel menampilkan 300 baris pertama. Gunakan Ekspor Excel / CSV atau Cetak untuk mengunduh seluruh {recapData.recap_rows.length} baris.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <PrintPreviewModal
+        isOpen={printOpen}
+        onClose={() => setPrintOpen(false)}
+        documentTitle={`Daftar Nilai Ujian: ${selectedExam?.title || ''}`}
+        subtitle={`Bidang: ${selectedExam?.subject || 'Umum'} · Filter Kelas: ${kelasFilter === 'ALL' ? 'Semua Kelas' : kelasFilter}`}
+        activityName={selectedExam?.title || 'Evaluasi Akademik CBT'}
+        appName={config.app_name}
+        orgName={config.org_name}
+        schoolName={config.school_name}
+        logoUrl={config.logo_url}
+        authorName={currentUser.nama}
+        filePrefix={`Daftar_Nilai_${selectedExamId}`}
+        defaultOrientation="landscape"
+        summaryPairs={[
+          { label: 'Total Peserta Ditampilkan', value: filteredResults.length },
+          { label: 'Rata-rata Nilai', value: avgFiltered },
+          { label: 'Skor Maksimal Ujian', value: maxScore },
+        ]}
+        columns={[
+          { key: 'no', label: 'No', align: 'center' },
+          { key: 'username', label: 'Username' },
+          { key: 'nama', label: 'Nama Peserta' },
+          { key: 'kelas', label: 'Kelas' },
+          { key: 'bsk', label: 'B / S / K', align: 'center' },
+          { key: 'nilai', label: 'Nilai Akhir', align: 'right' },
+          { key: 'persen', label: '%', align: 'right' },
+          { key: 'publikasi', label: 'Status' },
+        ]}
+        rows={printRows}
+      />
+
+      {recapData && (
+        <PrintPreviewModal
+          isOpen={recapPrintOpen}
+          onClose={() => setRecapPrintOpen(false)}
+          documentTitle={`Rekapitulasi Jawaban Peserta: ${selectedExam?.title || ''}`}
+          subtitle={`${recapData.questions.length} Butir Soal · ${recapData.participants.length} Peserta`}
+          activityName={selectedExam?.title || 'Rekap Jawaban Ujian'}
+          appName={config.app_name}
+          orgName={config.org_name}
+          schoolName={config.school_name}
+          logoUrl={config.logo_url}
+          authorName={currentUser.nama}
+          filePrefix={`Rekap_Jawaban_${selectedExamId}`}
+          defaultOrientation="landscape"
+          columns={[
+            { key: 'soal', label: 'No Soal', align: 'center' },
+            { key: 'tipe', label: 'Tipe' },
+            { key: 'nama', label: 'Nama Peserta' },
+            { key: 'kelas', label: 'Kelas' },
+            { key: 'jawaban', label: 'Jawaban Peserta' },
+            { key: 'kunci', label: 'Kunci' },
+            { key: 'skor', label: 'Skor', align: 'right' },
+          ]}
+          rows={recapData.recap_rows.map((r) => ({
+            soal: `#${String(r.question_order)}`,
+            tipe: String(r.question_type || ''),
+            nama: String(r.nama || ''),
+            kelas: String(r.kelas || '—'),
+            jawaban: String(r.student_answer || '—'),
+            kunci: String(r.correct_answer || '—'),
+            skor: `${Number(r.earned_score || 0)}/${Number(r.max_score || 0)}`,
+          }))}
+        />
+      )}
     </div>
   );
 }
 
-export function LeaderboardView() {
+export function LeaderboardView({
+  config,
+  currentUser,
+}: {
+  config?: Partial<AppSettingsMap>;
+  currentUser?: UserRecord;
+} = {}) {
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState('');
   const [leaderboard, setLeaderboard] = useState<RankedLeaderboardEntry[]>([]);
   const [error, setError] = useState('');
+  const [printOpen, setPrintOpen] = useState(false);
 
   useEffect(() => {
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
@@ -319,6 +791,18 @@ export function LeaderboardView() {
       });
   }, [selectedExamId]);
 
+  const selectedExam = exams.find((e) => e.exam_id === selectedExamId);
+
+  const exportRows = leaderboard.map((row) => ({
+    Peringkat: row.rank,
+    Nama_Peserta: row.nama,
+    Kelas: row.kelas,
+    Nilai: row.total_score,
+    Skor_Maksimal: row.max_score,
+    Persentase: `${row.percentage}%`,
+    Durasi_Pengerjaan: `${Math.floor(row.duration_seconds / 60)}m ${row.duration_seconds % 60}d`,
+  }));
+
   return (
     <div className="space-y-4">
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
@@ -326,18 +810,55 @@ export function LeaderboardView() {
           <Award className="w-5 h-5 text-amber-600" />
           <span>Peringkat & Leaderboard Peserta</span>
         </div>
-        <select
-          aria-label="Filter ujian leaderboard"
-          value={selectedExamId}
-          onChange={(e) => setSelectedExamId(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[260px]"
-        >
-          {exams.map((e) => (
-            <option key={e.exam_id} value={e.exam_id}>
-              {e.title}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Filter ujian leaderboard"
+            value={selectedExamId}
+            onChange={(e) => setSelectedExamId(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[240px]"
+          >
+            {exams.map((e) => (
+              <option key={e.exam_id} value={e.exam_id}>
+                {e.title}
+              </option>
+            ))}
+          </select>
+
+          {leaderboard.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={() =>
+                  exportRowsToExcel(
+                    `Peringkat_${selectedExamId}.xlsx`,
+                    'Peringkat_Peserta',
+                    exportRows,
+                  )
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={() => exportRowsToCsv(`Peringkat_${selectedExamId}.csv`, exportRows)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                CSV
+              </button>
+              <button
+                type="button"
+                onClick={() => setPrintOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0F294A] text-white text-xs font-semibold hover:bg-blue-800 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                Cetak Peringkat
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {error ? (
@@ -384,15 +905,52 @@ export function LeaderboardView() {
           </table>
         </div>
       )}
+
+      <PrintPreviewModal
+        isOpen={printOpen}
+        onClose={() => setPrintOpen(false)}
+        documentTitle={`Hasil dan Peringkat Ujian: ${selectedExam?.title || ''}`}
+        subtitle={`Bidang: ${selectedExam?.subject || 'Evaluasi Akademik'}`}
+        activityName={selectedExam?.title || 'Peringkat Peserta'}
+        appName={config?.app_name}
+        orgName={config?.org_name}
+        schoolName={config?.school_name}
+        logoUrl={config?.logo_url}
+        authorName={currentUser?.nama || 'Pembina KIR IPA'}
+        filePrefix={`Peringkat_${selectedExamId}`}
+        columns={[
+          { key: 'rank', label: 'Peringkat', align: 'center' },
+          { key: 'nama', label: 'Nama Peserta' },
+          { key: 'kelas', label: 'Kelas' },
+          { key: 'nilai', label: 'Nilai', align: 'right' },
+          { key: 'persen', label: 'Persentase', align: 'right' },
+          { key: 'durasi', label: 'Durasi', align: 'center' },
+        ]}
+        rows={leaderboard.map((row) => ({
+          rank: `#${row.rank}`,
+          nama: row.nama,
+          kelas: row.kelas,
+          nilai: `${row.total_score} / ${row.max_score}`,
+          persen: `${row.percentage}%`,
+          durasi: `${Math.floor(row.duration_seconds / 60)}m ${row.duration_seconds % 60}d`,
+        }))}
+      />
     </div>
   );
 }
 
-export function ItemAnalysisView() {
+export function ItemAnalysisView({
+  config,
+  currentUser,
+}: {
+  config?: Partial<AppSettingsMap>;
+  currentUser?: UserRecord;
+} = {}) {
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState('');
   const [analysis, setAnalysis] = useState<ItemAnalysisResult[]>([]);
   const [totalRespondents, setTotalRespondents] = useState(0);
+  const [printOpen, setPrintOpen] = useState(false);
 
   useEffect(() => {
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
@@ -411,6 +969,76 @@ export function ItemAnalysisView() {
       setAnalysis(res.analysis);
     });
   }, [selectedExamId]);
+
+  const selectedExam = exams.find((e) => e.exam_id === selectedExamId);
+
+  const exportStatsExcel = () => {
+    const avgPct =
+      analysis.length > 0
+        ? Number(
+            (analysis.reduce((s, a) => s + a.correct_percentage, 0) / analysis.length).toFixed(1),
+          )
+        : 0;
+    const problematicCount = analysis.filter((a) => a.problematic).length;
+
+    exportMultiSheetExcel(`Laporan_Statistik_Ujian_${selectedExamId}.xlsx`, [
+      {
+        name: 'Ringkasan_Statistik',
+        rows: [
+          {
+            Judul_Ujian: selectedExam?.title || '',
+            Mata_Pelajaran: selectedExam?.subject || '',
+            Total_Responden: totalRespondents,
+            Jumlah_Butir_Soal: analysis.length,
+            Rata_Rata_Persen_Benar: `${avgPct}%`,
+            Jumlah_Soal_Perlu_Review: problematicCount,
+            Tanggal_Ekspor: new Date().toLocaleString('id-ID'),
+          },
+        ],
+      },
+      {
+        name: 'Analisis_Butir_Soal',
+        rows: analysis.map((item, idx) => ({
+          No_Soal: idx + 1,
+          Tipe: item.question_type,
+          Cuplikan_Soal: item.question_text_preview,
+          Benar: item.correct_count,
+          Salah: item.incorrect_count,
+          Kosong: item.unanswered_count,
+          Persen_Benar: `${item.correct_percentage}%`,
+          Tingkat_Kesukaran: item.difficulty_label,
+          Daya_Pembeda:
+            item.discrimination_index !== null
+              ? `${item.discrimination_index} (${item.discrimination_label})`
+              : item.discrimination_label,
+          Distribusi_Opsi: Object.entries(item.option_distribution)
+            .map(([k, v]) => `${k}:${v}`)
+            .join(', '),
+          Catatan: item.problematic ? item.problem_reason : 'Valid',
+        })),
+      },
+    ]);
+  };
+
+  const exportStatsCsv = () => {
+    exportRowsToCsv(
+      `Analisis_Butir_${selectedExamId}.csv`,
+      analysis.map((item, idx) => ({
+        No_Soal: idx + 1,
+        Tipe: item.question_type,
+        Cuplikan_Soal: item.question_text_preview,
+        Benar: item.correct_count,
+        Salah: item.incorrect_count,
+        Kosong: item.unanswered_count,
+        Persen_Benar: `${item.correct_percentage}%`,
+        Tingkat_Kesukaran: item.difficulty_label,
+        Daya_Pembeda:
+          item.discrimination_index !== null
+            ? `${item.discrimination_index} (${item.discrimination_label})`
+            : item.discrimination_label,
+      })),
+    );
+  };
 
   const chartConfig = useMemo(
     () => ({
@@ -439,23 +1067,49 @@ export function ItemAnalysisView() {
     <div className="space-y-5">
       <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-base font-bold text-[#0F294A]">Analisis Butir Soal</h2>
+          <h2 className="text-base font-bold text-[#0F294A]">Analisis Butir Soal & Statistik Ujian</h2>
           <p className="text-xs text-slate-500">
             Total responden dianalisis: <strong className="font-mono">{totalRespondents}</strong> peserta
           </p>
         </div>
-        <select
-          aria-label="Pilih ujian untuk analisis"
-          value={selectedExamId}
-          onChange={(e) => setSelectedExamId(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[260px]"
-        >
-          {exams.map((e) => (
-            <option key={e.exam_id} value={e.exam_id}>
-              {e.title}
-            </option>
-          ))}
-        </select>
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label="Pilih ujian untuk analisis"
+            value={selectedExamId}
+            onChange={(e) => setSelectedExamId(e.target.value)}
+            className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[240px]"
+          >
+            {exams.map((e) => (
+              <option key={e.exam_id} value={e.exam_id}>
+                {e.title}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={exportStatsExcel}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+            Excel Statistik
+          </button>
+          <button
+            type="button"
+            onClick={exportStatsCsv}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrintOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0F294A] text-white text-xs font-semibold hover:bg-blue-800 cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Cetak Statistik
+          </button>
+        </div>
       </div>
 
       {totalRespondents > 0 && totalRespondents < 6 && (
@@ -525,6 +1179,42 @@ export function ItemAnalysisView() {
           </table>
         </div>
       </div>
+
+      <PrintPreviewModal
+        isOpen={printOpen}
+        onClose={() => setPrintOpen(false)}
+        documentTitle={`Laporan Statistik & Analisis Butir Soal: ${selectedExam?.title || ''}`}
+        subtitle={`Total Responden: ${totalRespondents} peserta · Total Butir: ${analysis.length} soal`}
+        activityName={selectedExam?.title || 'Analisis Statistik Ujian'}
+        appName={config?.app_name}
+        orgName={config?.org_name}
+        schoolName={config?.school_name}
+        logoUrl={config?.logo_url}
+        authorName={currentUser?.nama || 'Pembina KIR IPA'}
+        filePrefix={`Analisis_Statistik_${selectedExamId}`}
+        defaultOrientation="landscape"
+        columns={[
+          { key: 'no', label: 'No', align: 'center' },
+          { key: 'tipe', label: 'Tipe' },
+          { key: 'cuplikan', label: 'Cuplikan Soal' },
+          { key: 'bsk', label: 'B / S / K', align: 'center' },
+          { key: 'pct', label: '% Benar', align: 'right' },
+          { key: 'kesukaran', label: 'Kesukaran' },
+          { key: 'daya', label: 'Daya Pembeda' },
+        ]}
+        rows={analysis.map((item, idx) => ({
+          no: `#${idx + 1}`,
+          tipe: item.question_type,
+          cuplikan: item.question_text_preview,
+          bsk: `${item.correct_count} / ${item.incorrect_count} / ${item.unanswered_count}`,
+          pct: `${item.correct_percentage}%`,
+          kesukaran: item.difficulty_label,
+          daya:
+            item.discrimination_index !== null
+              ? `${item.discrimination_index} (${item.discrimination_label})`
+              : item.discrimination_label,
+        }))}
+      />
     </div>
   );
 }
@@ -536,202 +1226,7 @@ export function ReportsAndBeritaAcaraView({
   config: Partial<AppSettingsMap>;
   currentUser: UserRecord;
 }) {
-  const [exams, setExams] = useState<ExamRecord[]>([]);
-  const [selectedExamId, setSelectedExamId] = useState('');
-  const [berita, setBerita] = useState<{
-    exam: ExamRecord;
-    identity: Record<string, string>;
-    summary: {
-      registered: number;
-      present: number;
-      absent: number;
-      finished: number;
-      technical_issues: number;
-      violations: Array<{ event_type: string; count: number }>;
-      supervisor_name: string;
-      generated_at: string;
-    };
-  } | null>(null);
-  const [notes, setNotes] = useState('Pelaksanaan ujian berjalan tertib, aman, dan sesuai tata tertib KIR IPA SMAN 1 Sukabumi.');
-
-  useEffect(() => {
-    void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
-      setExams(res.exams);
-      const pref = res.exams.find((e) => e.status === 'COMPLETED') || res.exams[0];
-      if (pref) setSelectedExamId(pref.exam_id);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!selectedExamId) return;
-    void apiFetch<typeof berita>(`/reports/${selectedExamId}/berita-acara`).then(setBerita);
-  }, [selectedExamId]);
-
-  const handleExportAll = async (type: 'EXCEL' | 'CSV' | 'PDF') => {
-    if (!selectedExamId || !berita) return;
-    const [resData, monData] = await Promise.all([
-      apiFetch<{ results: Array<Record<string, unknown>>; max_score: number }>(`/results/${selectedExamId}`),
-      apiFetch<{ violations: Array<Record<string, unknown>> }>(`/monitoring/${selectedExamId}`),
-    ]);
-
-    const rows = resData.results.map((r, i) => ({
-      No: i + 1,
-      Nama: r.nama,
-      Kelas: r.kelas,
-      Benar: r.correct_count,
-      Salah: r.incorrect_count,
-      Nilai: r.total_score,
-      Maksimal: resData.max_score,
-    }));
-
-    if (type === 'EXCEL') {
-      exportRowsToExcel(`Laporan_Lengkap_${selectedExamId}.xlsx`, 'Rekap_Nilai', rows);
-    } else if (type === 'CSV') {
-      exportRowsToCsv(`Laporan_Nilai_${selectedExamId}.csv`, rows);
-    } else {
-      exportTableToPdf(
-        `Berita_Acara_${selectedExamId}.pdf`,
-        {
-          appName: config.app_name || 'CBT KIR IPA SMAN 1 SUKABUMI',
-          orgName: config.org_name || 'KIR IPA',
-          schoolName: config.school_name || 'SMAN 1 Sukabumi',
-          title: `Berita Acara & Rekap Ujian: ${berita.exam.title}`,
-          activityName: berita.exam.subject,
-          authorName: currentUser.nama,
-        },
-        ['Keterangan', 'Nilai / Jumlah'],
-        [
-          ['Nama Ujian', berita.exam.title],
-          ['Tanggal Pelaksanaan', new Date(berita.exam.start_time).toLocaleDateString('id-ID')],
-          ['Peserta Terdaftar', berita.summary.registered],
-          ['Peserta Hadir', berita.summary.present],
-          ['Tidak Hadir', berita.summary.absent],
-          ['Selesai Mengumpulkan', berita.summary.finished],
-          ['Gangguan Teknis', berita.summary.technical_issues],
-          ['Total Catatan Pelanggaran', monData.violations.length],
-          ['Catatan Pelaksanaan', notes],
-          ['Penanggung Jawab', berita.summary.supervisor_name],
-        ],
-      );
-    }
-  };
-
-  return (
-    <div className="space-y-5">
-      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3 no-print">
-        <select
-          aria-label="Pilih ujian untuk laporan"
-          value={selectedExamId}
-          onChange={(e) => setSelectedExamId(e.target.value)}
-          className="px-3 py-2 rounded-lg border border-slate-300 text-sm bg-white min-w-[260px]"
-        >
-          {exams.map((e) => (
-            <option key={e.exam_id} value={e.exam_id}>
-              {e.title} ({e.status})
-            </option>
-          ))}
-        </select>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => handleExportAll('EXCEL')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
-          >
-            <FileSpreadsheet className="w-3.5 h-3.5" />
-            Ekspor Excel
-          </button>
-          <button
-            type="button"
-            onClick={() => handleExportAll('CSV')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Ekspor CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => handleExportAll('PDF')}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#0F294A] text-white text-xs font-semibold hover:bg-blue-800 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Ekspor Berita Acara PDF
-          </button>
-          <button
-            type="button"
-            onClick={() => window.print()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            Cetak
-          </button>
-        </div>
-      </div>
-
-      {berita && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 sm:p-8 space-y-6">
-          <div className="flex items-center gap-4 border-b-2 border-[#0F294A] pb-4">
-            <AppLogo src={config.logo_url} sizeClass="w-16 h-16" />
-            <div>
-              <div className="text-xs font-semibold text-amber-700">
-                {berita.identity.org_name} · {berita.identity.school_name}
-              </div>
-              <h2 className="text-xl font-bold text-[#0F294A]">BERITA ACARA PELAKSANAAN UJIAN DIGITAL</h2>
-              <p className="text-xs text-slate-600">
-                Tahun Ajaran {berita.identity.academic_year} · {berita.identity.app_name}
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
-            <div className="space-y-1.5">
-              <div><span className="text-slate-500">Nama Ujian:</span> <strong>{berita.exam.title}</strong></div>
-              <div><span className="text-slate-500">Bidang / Mata Pelajaran:</span> <strong>{berita.exam.subject}</strong></div>
-              <div>
-                <span className="text-slate-500">Tanggal Pelaksanaan:</span>{' '}
-                <strong>{new Date(berita.exam.start_time).toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</strong>
-              </div>
-              <div><span className="text-slate-500">Durasi:</span> <strong className="font-mono">{berita.exam.duration} Menit</strong></div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs">
-              <div>Terdaftar: <strong className="font-mono text-sm block">{berita.summary.registered}</strong></div>
-              <div>Hadir: <strong className="font-mono text-sm block text-blue-700">{berita.summary.present}</strong></div>
-              <div>Tidak Hadir: <strong className="font-mono text-sm block text-slate-600">{berita.summary.absent}</strong></div>
-              <div>Selesai: <strong className="font-mono text-sm block text-emerald-700">{berita.summary.finished}</strong></div>
-              <div>Gangguan Teknis: <strong className="font-mono text-sm block text-amber-700">{berita.summary.technical_issues}</strong></div>
-              <div>
-                Pelanggaran:{' '}
-                <strong className="font-mono text-sm block text-red-700">
-                  {berita.summary.violations.reduce((s, v) => s + v.count, 0)}
-                </strong>
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-              Catatan Pelaksanaan Pengawas
-            </label>
-            <textarea
-              rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm"
-            />
-          </div>
-
-          <div className="pt-4 flex justify-between items-end text-xs text-slate-600 border-t border-slate-200">
-            <div>{berita.identity.report_footer}</div>
-            <div className="text-right">
-              <div>Sukabumi, {new Date().toLocaleDateString('id-ID')}</div>
-              <div className="mt-10 font-bold text-slate-900">{berita.summary.supervisor_name}</div>
-              <div>Penanggung Jawab Pelaksanaan</div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return <OfficialDocumentStudio config={config} currentUser={currentUser} />;
 }
 
 export function StudentResultDetailModal({

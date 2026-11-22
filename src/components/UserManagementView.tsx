@@ -1,17 +1,25 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import * as XLSX from 'xlsx';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import {
   Download,
+  FileSpreadsheet,
   KeyRound,
   Plus,
+  Printer,
   Search,
   Trash2,
   Upload,
   UserCog,
 } from 'lucide-react';
+import { PrintPreviewModal } from './PrintPreviewModal';
+import { SpreadsheetImportModal } from './SpreadsheetImportModal';
 import { apiFetch } from '../utils/api';
-import { downloadParticipantImportTemplate } from '../utils/exporters';
-import type { UserRecord, UserRole } from '../shared/types';
+import {
+  downloadImportTemplate,
+  exportRowsToCsv,
+  exportRowsToExcel,
+} from '../utils/exporters';
+import type { ValidatedPreviewRow } from '../shared/spreadsheet';
+import type { ImportSummaryResult, UserRecord, UserRole } from '../shared/types';
 
 interface UserManagementViewProps {
   currentUser: UserRecord;
@@ -40,6 +48,10 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
   // Reset password modal
   const [resetTarget, setResetTarget] = useState<UserRecord | null>(null);
   const [resetPasswordVal, setResetPasswordVal] = useState('');
+
+  // Import & Print modals
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
 
   const pageSize = 10;
 
@@ -165,29 +177,24 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
     }
   };
 
-  const handleImportCsvExcel = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf);
-      const firstSheet = wb.Sheets[wb.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet);
-      const res = await apiFetch<{ imported: number; errors: string[] }>('/users/import', {
-        method: 'POST',
-        body: JSON.stringify({ users: rows }),
-      });
-      showToast(
-        `Impor selesai: ${res.imported} akun berhasil ditambahkan${
-          res.errors.length ? `, ${res.errors.length} baris dilewati.` : '.'
-        }`,
-      );
-      await loadUsers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Gagal membaca berkas impor.');
-    } finally {
-      e.target.value = '';
-    }
+  const existingUsernames = useMemo(
+    () => new Set(users.map((u) => u.username.toLowerCase())),
+    [users],
+  );
+
+  const handleImportSubmit = async (
+    validRows: ValidatedPreviewRow[],
+  ): Promise<ImportSummaryResult> => {
+    const payloadUsers = validRows.map((r) => ({
+      _rowNumber: r.rowNumber,
+      ...(r.normalizedPayload || r.mapped),
+    }));
+    const res = await apiFetch<ImportSummaryResult>('/users/import', {
+      method: 'POST',
+      body: JSON.stringify({ users: payloadUsers }),
+    });
+    await loadUsers();
+    return res;
   };
 
   const filteredUsers = users.filter((u) => {
@@ -199,6 +206,24 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
       u.kelas.toLowerCase().includes(q)
     );
   });
+
+  const handleExportUsers = (format: 'xlsx' | 'csv') => {
+    const rows = filteredUsers.map((u, idx) => ({
+      No: idx + 1,
+      Username: u.username,
+      Nama_Lengkap: u.nama,
+      Kelas_Divisi: u.kelas || '',
+      Role: u.role,
+      Status: u.status === 'ACTIVE' ? 'Aktif' : 'Nonaktif',
+      Dibuat_Pada: u.created_at ? new Date(u.created_at).toLocaleDateString('id-ID') : '',
+    }));
+    const suffix = lockedRoleFilter || roleFilter || 'Semua';
+    if (format === 'csv') {
+      exportRowsToCsv(`Data_Peserta_${suffix}.csv`, rows);
+    } else {
+      exportRowsToExcel(`Data_Peserta_${suffix}.xlsx`, 'Data_Peserta', rows);
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
   const pagedUsers = filteredUsers.slice((page - 1) * pageSize, page * pageSize);
@@ -250,22 +275,44 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={downloadParticipantImportTemplate}
+            onClick={() => downloadImportTemplate('USERS', 'xlsx')}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             Template Impor
           </button>
-          <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
+          <button
+            type="button"
+            onClick={() => setImportModalOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
             <Upload className="w-3.5 h-3.5" />
             Impor Excel/CSV
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv"
-              onChange={handleImportCsvExcel}
-              className="hidden"
-            />
-          </label>
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportUsers('xlsx')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+            Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportUsers('csv')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-700" />
+            CSV
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrintOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Cetak Daftar
+          </button>
           <button
             type="button"
             onClick={openCreateModal}
@@ -554,6 +601,54 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
           </div>
         </div>
       )}
+
+      <SpreadsheetImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        entityType="USERS"
+        title="Impor Data Peserta & Pengguna (Excel / CSV)"
+        subtitle="Pratinjau data, pemetaan kolom otomatis, validasi format, dan pencegahan duplikasi username."
+        existingKeys={existingUsernames}
+        onImportSubmit={handleImportSubmit}
+      />
+
+      <PrintPreviewModal
+        isOpen={printOpen}
+        onClose={() => setPrintOpen(false)}
+        documentTitle={
+          lockedRoleFilter === 'SISWA'
+            ? 'DAFTAR PESERTA DIDIK PORTAL CBT'
+            : lockedRoleFilter === 'PROFESSOR'
+              ? 'DAFTAR PEMBINA / PROFESSOR PORTAL CBT'
+              : 'DAFTAR PENGGUNA PORTAL CBT'
+        }
+        subtitle={`Total data sesuai filter aktif: ${filteredUsers.length} akun`}
+        activityName="Administrasi Peserta & Pengguna CBT KIR IPA"
+        authorName={currentUser.nama}
+        filePrefix="Daftar_Peserta_CBT"
+        columns={[
+          { key: 'no', label: 'No', align: 'center' },
+          { key: 'username', label: 'Username / NIS' },
+          { key: 'nama', label: 'Nama Lengkap' },
+          { key: 'kelas', label: 'Kelas / Divisi' },
+          { key: 'role', label: 'Role', align: 'center' },
+          { key: 'status', label: 'Status', align: 'center' },
+        ]}
+        rows={filteredUsers.map((u, idx) => ({
+          no: idx + 1,
+          username: u.username,
+          nama: u.nama,
+          kelas: u.kelas || '—',
+          role: u.role,
+          status: u.status === 'ACTIVE' ? 'Aktif' : 'Nonaktif',
+        }))}
+        summaryPairs={[
+          { label: 'Total Ditampilkan', value: filteredUsers.length },
+          { label: 'Akun Aktif', value: filteredUsers.filter((u) => u.status === 'ACTIVE').length },
+          { label: 'Peserta Siswa', value: filteredUsers.filter((u) => u.role === 'SISWA').length },
+          { label: 'Pembina / Admin', value: filteredUsers.filter((u) => u.role !== 'SISWA').length },
+        ]}
+      />
     </div>
   );
 }

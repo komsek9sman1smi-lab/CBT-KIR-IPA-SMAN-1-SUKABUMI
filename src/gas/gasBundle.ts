@@ -47,7 +47,9 @@ function include(filename) {
   ESSAY_GRADES: 'ESSAY_GRADES',
   BACKUP_LOGS: 'BACKUP_LOGS',
   EXAM_CATEGORIES: 'EXAM_CATEGORIES',
-  NOTIFICATIONS: 'NOTIFICATIONS'
+  NOTIFICATIONS: 'NOTIFICATIONS',
+  REPORT_TEMPLATES: 'REPORT_TEMPLATES',
+  OFFICIAL_DOCUMENTS: 'OFFICIAL_DOCUMENTS'
 };
 
 function getSpreadsheet() {
@@ -77,7 +79,7 @@ function getAppSecret() {
   {
     path: 'Database.gs',
     folder: 'BACKEND',
-    description: 'Inisialisasi 16 sheet database secara otomatis beserta header kolom dan akun Super Admin awal.',
+    description: 'Inisialisasi 18 sheet database secara otomatis beserta header kolom dan akun Super Admin awal.',
     content: `var TABLE_SCHEMAS = {
   USERS: ['user_id', 'username', 'password_hash', 'password_salt', 'nama', 'kelas', 'role', 'status', 'created_at'],
   EXAMS: ['exam_id', 'title', 'description', 'subject', 'start_time', 'end_time', 'duration', 'status', 'total_questions', 'created_by', 'settings_json'],
@@ -94,7 +96,9 @@ function getAppSecret() {
   ESSAY_GRADES: ['grade_id', 'exam_id', 'question_id', 'user_id', 'score', 'feedback', 'graded_by', 'graded_at'],
   BACKUP_LOGS: ['backup_id', 'file_id', 'created_at', 'created_by', 'status'],
   EXAM_CATEGORIES: ['category_id', 'category_name', 'description', 'created_at'],
-  NOTIFICATIONS: ['notification_id', 'user_id', 'title', 'message', 'created_at', 'is_read']
+  NOTIFICATIONS: ['notification_id', 'user_id', 'title', 'message', 'created_at', 'is_read'],
+  REPORT_TEMPLATES: ['template_id', 'name', 'doc_category', 'exam_id', 'is_default', 'content_json', 'created_by', 'created_at', 'updated_at'],
+  OFFICIAL_DOCUMENTS: ['doc_id', 'exam_id', 'template_id', 'doc_category', 'title', 'doc_number', 'status', 'content_json', 'created_by', 'created_at', 'updated_at']
 };
 
 function initializeDatabase() {
@@ -659,19 +663,73 @@ function emergencyStopExam(token, examId) {
   {
     path: 'ReportController.gs',
     folder: 'BACKEND',
-    description: 'Penyusunan Berita Acara Ujian otomatis dan rekap hasil untuk ekspor Excel/CSV/PDF.',
+    description: 'Penyusunan Laporan Hasil Ujian, Template Kustom, Berita Acara, dan Surat Resmi Pengumuman Pemenang.',
     content: `function generateBeritaAcaraData(token, examId) {
   requireAuthorizedUser(token, ['SUPER_ADMIN', 'PROFESSOR']);
   var exam = readSheetAsObjects(SHEET_NAMES.EXAMS).filter(function(e) { return e.exam_id === examId; })[0];
   var parts = readSheetAsObjects(SHEET_NAMES.EXAM_PARTICIPANTS).filter(function(p) { return p.exam_id === examId; });
+  var results = readSheetAsObjects(SHEET_NAMES.RESULTS).filter(function(r) { return r.exam_id === examId; });
   var violations = readSheetAsObjects(SHEET_NAMES.VIOLATION_LOGS).filter(function(v) { return v.exam_id === examId; });
+  var scores = results.map(function(r) { return Number(r.total_score || 0); });
+  var avg = scores.length ? scores.reduce(function(a, b) { return a + b; }, 0) / scores.length : 0;
   return {
     exam: exam,
     registered: parts.length,
     finished: parts.filter(function(p) { return p.status === 'TERKUMPUL'; }).length,
+    highest_score: scores.length ? Math.max.apply(null, scores) : 0,
+    lowest_score: scores.length ? Math.min.apply(null, scores) : 0,
+    average_score: Math.round(avg * 100) / 100,
     violation_count: violations.length,
     generated_at: new Date().toISOString()
   };
+}
+
+function saveReportTemplate(token, payload) {
+  var auth = requireAuthorizedUser(token, ['SUPER_ADMIN', 'PROFESSOR']);
+  var tplId = payload.template_id || generateId('tpl');
+  var nowStr = new Date().toISOString();
+  var obj = {
+    template_id: tplId,
+    name: payload.name || 'Template Baru',
+    doc_category: payload.doc_category || 'LAPORAN_HASIL',
+    exam_id: payload.exam_id || '',
+    is_default: 0,
+    content_json: typeof payload.content_json === 'string' ? payload.content_json : JSON.stringify(payload.content || {}),
+    created_by: auth.user.user_id,
+    created_at: nowStr,
+    updated_at: nowStr
+  };
+  if (payload.template_id) {
+    updateRowByKey(SHEET_NAMES.REPORT_TEMPLATES, 'template_id', tplId, obj);
+  } else {
+    appendRowObject(SHEET_NAMES.REPORT_TEMPLATES, obj);
+  }
+  return { ok: true, template_id: tplId };
+}
+
+function saveOfficialDocument(token, payload) {
+  var auth = requireAuthorizedUser(token, ['SUPER_ADMIN', 'PROFESSOR']);
+  var docId = payload.doc_id || generateId('doc');
+  var nowStr = new Date().toISOString();
+  var obj = {
+    doc_id: docId,
+    exam_id: payload.exam_id || '',
+    template_id: payload.template_id || '',
+    doc_category: payload.doc_category || 'BERITA_ACARA',
+    title: payload.title || 'Dokumen Resmi CBT',
+    doc_number: payload.doc_number || '',
+    status: payload.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT',
+    content_json: typeof payload.content_json === 'string' ? payload.content_json : JSON.stringify(payload.content || {}),
+    created_by: auth.user.user_id,
+    created_at: nowStr,
+    updated_at: nowStr
+  };
+  if (payload.doc_id) {
+    updateRowByKey(SHEET_NAMES.OFFICIAL_DOCUMENTS, 'doc_id', docId, obj);
+  } else {
+    appendRowObject(SHEET_NAMES.OFFICIAL_DOCUMENTS, obj);
+  }
+  return { ok: true, doc_id: docId };
 }`,
   },
   {

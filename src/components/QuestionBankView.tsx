@@ -1,5 +1,4 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
-import * as XLSX from 'xlsx';
+import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   Copy,
   Download,
@@ -8,16 +7,25 @@ import {
   FolderInput,
   ImagePlus,
   Plus,
+  Printer,
   Search,
   Trash2,
   Upload,
 } from 'lucide-react';
+import { PrintPreviewModal } from './PrintPreviewModal';
 import { RichMathRenderer } from './RichMathRenderer';
+import { SpreadsheetImportModal } from './SpreadsheetImportModal';
 import { apiFetch } from '../utils/api';
-import { downloadQuestionImportTemplate, exportRowsToExcel } from '../utils/exporters';
+import {
+  downloadImportTemplate,
+  exportRowsToCsv,
+  exportRowsToExcel,
+} from '../utils/exporters';
+import { buildQuestionDedupeKey, type ValidatedPreviewRow } from '../shared/spreadsheet';
 import { safeJsonParse } from '../shared/grading';
 import type {
   DifficultyLevel,
+  ImportSummaryResult,
   QuestionOptionsPayload,
   QuestionRecord,
   QuestionType,
@@ -88,9 +96,9 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
     { id: 'ord_3', text: '' },
   ]);
 
-  // Import modal preview
-  const [importPreviewRows, setImportPreviewRows] = useState<Record<string, unknown>[]>([]);
-  const [importReport, setImportReport] = useState<{ imported: number; failed: Array<{ row: number; reason: string }> } | null>(null);
+  // Import & Print modal states
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
 
   const loadData = async () => {
     setLoading(true);
@@ -348,44 +356,60 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
     await loadData();
   };
 
-  const handleImportFileSelect = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf);
-    const sheet = wb.Sheets[wb.SheetNames[0]];
-    const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
-    setImportPreviewRows(rows);
-    setImportReport(null);
-    e.target.value = '';
-  };
+  const existingQuestionKeys = useMemo(
+    () => new Set(questions.map((q) => buildQuestionDedupeKey(q.question_type, q.question_text))),
+    [questions],
+  );
 
-  const confirmImportRows = async () => {
-    const res = await apiFetch<{ imported: number; failed: Array<{ row: number; reason: string }> }>(
-      '/questions/import',
-      {
-        method: 'POST',
-        body: JSON.stringify({ questions: importPreviewRows }),
-      },
-    );
-    setImportReport(res);
-    setImportPreviewRows([]);
-    await loadData();
-  };
-
-  const handleExportBank = () => {
-    const rows = filteredQuestions.map((q) => ({
-      ID: q.question_id,
-      Tipe: q.question_type,
-      Kategori: q.category,
-      Materi: q.materi || '',
-      Kesulitan: q.difficulty,
-      Bobot: q.score,
-      Pertanyaan: q.question_text.replace(/<[^>]+>/g, ''),
-      Kunci_Jawaban: q.correct_answer,
-      Pembahasan: q.explanation.replace(/<[^>]+>/g, ''),
+  const handleImportSubmit = async (
+    validRows: ValidatedPreviewRow[],
+  ): Promise<ImportSummaryResult> => {
+    const payloadQuestions = validRows.map((r) => ({
+      _rowNumber: r.rowNumber,
+      ...(r.normalizedPayload || r.mapped),
     }));
-    exportRowsToExcel('Bank_Soal_KIR_IPA_SMAN1_Sukabumi.xlsx', 'Bank_Soal', rows);
+    const res = await apiFetch<ImportSummaryResult>('/questions/import', {
+      method: 'POST',
+      body: JSON.stringify({ questions: payloadQuestions, skip_duplicates: true }),
+    });
+    await loadData();
+    return res;
+  };
+
+  const buildQuestionExportRows = () =>
+    filteredQuestions.map((q, idx) => {
+      const opts = safeJsonParse<QuestionOptionsPayload>(q.options_json, {});
+      const choiceMap: Record<string, string> = {};
+      for (const c of opts.choices || []) {
+        choiceMap[c.label] = c.text;
+      }
+      return {
+        No: idx + 1,
+        question_id: q.question_id,
+        question_type: q.question_type,
+        category: q.category,
+        materi: q.materi || '',
+        difficulty: q.difficulty,
+        score: q.score,
+        question_text: q.question_text,
+        option_a: choiceMap.A || '',
+        option_b: choiceMap.B || '',
+        option_c: choiceMap.C || '',
+        option_d: choiceMap.D || '',
+        option_e: choiceMap.E || '',
+        correct_answer: q.correct_answer,
+        explanation: q.explanation,
+        image_url: q.image_url || '',
+      };
+    });
+
+  const handleExportBank = (format: 'xlsx' | 'csv') => {
+    const rows = buildQuestionExportRows();
+    if (format === 'csv') {
+      exportRowsToCsv('Bank_Soal_KIR_IPA_SMAN1_Sukabumi.csv', rows);
+    } else {
+      exportRowsToExcel('Bank_Soal_KIR_IPA_SMAN1_Sukabumi.xlsx', 'Bank_Soal', rows);
+    }
   };
 
   const filteredQuestions = questions.filter((q) => {
@@ -475,29 +499,43 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
-              onClick={downloadQuestionImportTemplate}
+              onClick={() => downloadImportTemplate('QUESTIONS', 'xlsx')}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
               <Download className="w-3.5 h-3.5" />
               Template Excel
             </button>
-            <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer">
-              <Upload className="w-3.5 h-3.5" />
-              Impor Soal
-              <input
-                type="file"
-                accept=".xlsx,.xls,.csv"
-                onChange={handleImportFileSelect}
-                className="hidden"
-              />
-            </label>
             <button
               type="button"
-              onClick={handleExportBank}
+              onClick={() => setImportModalOpen(true)}
               className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
             >
-              <FileSpreadsheet className="w-3.5 h-3.5" />
-              Ekspor Excel
+              <Upload className="w-3.5 h-3.5" />
+              Impor Excel/CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportBank('xlsx')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+              Excel
+            </button>
+            <button
+              type="button"
+              onClick={() => handleExportBank('csv')}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5 text-blue-700" />
+              CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => setPrintOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              Cetak Bank Soal
             </button>
             <button
               type="button"
@@ -539,73 +577,6 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
           </div>
         )}
       </div>
-
-      {/* Import Preview Modal */}
-      {importPreviewRows.length > 0 && (
-        <div className="bg-white border border-blue-300 rounded-xl p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <h3 className="font-bold text-sm text-[#0F294A]">
-              Preview Impor Soal ({importPreviewRows.length} baris terdeteksi)
-            </h3>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setImportPreviewRows([])}
-                className="px-3 py-1.5 rounded border border-slate-300 text-xs cursor-pointer"
-              >
-                Batal
-              </button>
-              <button
-                type="button"
-                onClick={confirmImportRows}
-                className="px-3.5 py-1.5 rounded bg-[#0F294A] text-white text-xs font-semibold cursor-pointer"
-              >
-                Validasi & Simpan ke Bank Soal
-              </button>
-            </div>
-          </div>
-          <div className="max-h-48 overflow-auto border border-slate-200 rounded-lg">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="px-3 py-2">Tipe</th>
-                  <th className="px-3 py-2">Kategori</th>
-                  <th className="px-3 py-2">Pertanyaan</th>
-                  <th className="px-3 py-2">Kunci</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {importPreviewRows.slice(0, 10).map((r, i) => (
-                  <tr key={i}>
-                    <td className="px-3 py-2 font-mono">{String(r.question_type || '')}</td>
-                    <td className="px-3 py-2">{String(r.category || '')}</td>
-                    <td className="px-3 py-2 truncate max-w-md">{String(r.question_text || '')}</td>
-                    <td className="px-3 py-2 font-mono">{String(r.correct_answer || '')}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {importReport && (
-        <div className="bg-white border border-slate-200 rounded-xl p-4 text-xs space-y-1">
-          <div className="font-semibold text-emerald-700">
-            Berhasil mengimpor {importReport.imported} soal.
-          </div>
-          {importReport.failed.length > 0 && (
-            <div className="text-red-700">
-              <p className="font-semibold">Laporan soal gagal diimpor ({importReport.failed.length}):</p>
-              <ul className="list-disc list-inside">
-                {importReport.failed.map((f, idx) => (
-                  <li key={idx}>Baris {f.row}: {f.reason}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Question List */}
       <div className="space-y-3">
@@ -1178,6 +1149,51 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
           </div>
         </div>
       )}
+
+      <SpreadsheetImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        entityType="QUESTIONS"
+        title="Impor Bank Soal Multiformat (Excel / CSV)"
+        subtitle="Mendukung 7 jenis soal, pemetaan kolom fleksibel, pratinjau validasi, teks Indonesia & rumus KaTeX $...$."
+        existingKeys={existingQuestionKeys}
+        onImportSubmit={handleImportSubmit}
+      />
+
+      <PrintPreviewModal
+        isOpen={printOpen}
+        onClose={() => setPrintOpen(false)}
+        documentTitle="REKAPITULASI BANK SOAL PORTAL CBT"
+        subtitle={`Jumlah soal sesuai filter: ${filteredQuestions.length} butir`}
+        activityName="Bank Soal KIR IPA SMAN 1 Sukabumi"
+        authorName="Tim Penyusun Soal KIR IPA"
+        filePrefix="Bank_Soal_CBT"
+        defaultOrientation="landscape"
+        columns={[
+          { key: 'no', label: 'No', align: 'center' },
+          { key: 'tipe', label: 'Tipe', align: 'center' },
+          { key: 'kategori', label: 'Kategori / Materi' },
+          { key: 'kesulitan', label: 'Kesulitan', align: 'center' },
+          { key: 'bobot', label: 'Bobot', align: 'right' },
+          { key: 'pertanyaan', label: 'Cuplikan Pertanyaan' },
+          { key: 'kunci', label: 'Kunci' },
+        ]}
+        rows={filteredQuestions.map((q, idx) => ({
+          no: idx + 1,
+          tipe: q.question_type,
+          kategori: q.materi ? `${q.category} · ${q.materi}` : q.category,
+          kesulitan: q.difficulty,
+          bobot: q.score,
+          pertanyaan: q.question_text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 140),
+          kunci: q.correct_answer,
+        }))}
+        summaryPairs={[
+          { label: 'Total Soal', value: filteredQuestions.length },
+          { label: 'Total Bobot', value: filteredQuestions.reduce((acc, q) => acc + Number(q.score), 0) },
+          { label: 'Kategori', value: filterCategory || 'Semua' },
+          { label: 'Jenis', value: filterType || 'Semua' },
+        ]}
+      />
     </div>
   );
 }

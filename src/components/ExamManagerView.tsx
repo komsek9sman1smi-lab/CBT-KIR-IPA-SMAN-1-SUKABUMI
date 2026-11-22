@@ -5,17 +5,26 @@ import {
   ArrowUp,
   CheckCircle2,
   Clock,
+  Download,
   Edit3,
+  FileSpreadsheet,
   Plus,
+  Printer,
   Trash2,
+  Upload,
   Users,
 } from 'lucide-react';
+import { PrintPreviewModal } from './PrintPreviewModal';
+import { SpreadsheetImportModal } from './SpreadsheetImportModal';
 import { apiFetch } from '../utils/api';
+import { exportRowsToCsv, exportRowsToExcel } from '../utils/exporters';
 import { safeJsonParse } from '../shared/grading';
+import type { ValidatedPreviewRow } from '../shared/spreadsheet';
 import type {
   ExamRecord,
   ExamSettings,
   ExamStatus,
+  ImportSummaryResult,
   QuestionRecord,
   UserRecord,
 } from '../shared/types';
@@ -88,6 +97,22 @@ export function ExamManagerView({
 
   // Delete Exam Confirmation
   const [deleteTargetExam, setDeleteTargetExam] = useState<ExamRecord | null>(null);
+
+  // Per-Exam Spreadsheet Import & Print Participants States
+  const [importExamTarget, setImportExamTarget] = useState<{
+    exam: ExamRecord;
+    mode: 'EXAM_QUESTIONS' | 'EXAM_PARTICIPANTS';
+  } | null>(null);
+  const [printParticipantsData, setPrintParticipantsData] = useState<{
+    exam: ExamRecord;
+    participants: Array<{
+      username: string;
+      nama: string;
+      kelas: string;
+      status: string;
+      score: number;
+    }>;
+  } | null>(null);
 
   const loadAll = async () => {
     setLoading(true);
@@ -347,6 +372,80 @@ export function ExamManagerView({
     setPickedQuestions(next);
   };
 
+  const handleExportExams = (format: 'xlsx' | 'csv') => {
+    const rows = exams.map((ex, idx) => ({
+      No: idx + 1,
+      ID_Ujian: ex.exam_id,
+      Nama_Ujian: ex.title,
+      Bidang_Mapel: ex.subject,
+      Status: ex.status,
+      Mulai: ex.start_time ? new Date(ex.start_time).toLocaleString('id-ID') : '',
+      Selesai: ex.end_time ? new Date(ex.end_time).toLocaleString('id-ID') : '',
+      Durasi_Menit: ex.duration,
+      Jumlah_Soal: ex.total_questions,
+      Jumlah_Peserta: ex.participant_count ?? 0,
+    }));
+    if (format === 'csv') {
+      exportRowsToCsv('Daftar_Ujian_KIR_IPA.csv', rows);
+    } else {
+      exportRowsToExcel('Daftar_Ujian_KIR_IPA.xlsx', 'Daftar_Ujian', rows);
+    }
+  };
+
+  const handleOpenPrintParticipants = async (ex: ExamRecord) => {
+    try {
+      const detail = await apiFetch<{
+        exam: ExamRecord;
+        participants: Array<{
+          username: string;
+          nama: string;
+          kelas: string;
+          status: string;
+          score: number;
+        }>;
+      }>(`/exams/${ex.exam_id}`);
+      setPrintParticipantsData({
+        exam: detail.exam,
+        participants: detail.participants,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Gagal memuat daftar peserta ujian.');
+    }
+  };
+
+  const handleExamImportSubmit = async (
+    validRows: ValidatedPreviewRow[],
+    duplicateRows: ValidatedPreviewRow[],
+  ): Promise<ImportSummaryResult> => {
+    if (!importExamTarget) {
+      return { imported: 0, skipped_duplicates: 0, failed_count: 0, errors: [] };
+    }
+    const { exam, mode } = importExamTarget;
+    if (mode === 'EXAM_QUESTIONS') {
+      const allRows = [...validRows, ...duplicateRows].map((r) => ({
+        _rowNumber: r.rowNumber,
+        ...(r.normalizedPayload || r.mapped),
+      }));
+      const res = await apiFetch<ImportSummaryResult>(`/exams/${exam.exam_id}/questions/import`, {
+        method: 'POST',
+        body: JSON.stringify({ questions: allRows }),
+      });
+      await loadAll();
+      return res;
+    }
+
+    const payloadParts = validRows.map((r) => ({
+      _rowNumber: r.rowNumber,
+      ...(r.normalizedPayload || r.mapped),
+    }));
+    const res = await apiFetch<ImportSummaryResult>(`/exams/${exam.exam_id}/participants/import`, {
+      method: 'POST',
+      body: JSON.stringify({ participants: payloadParts }),
+    });
+    await loadAll();
+    return res;
+  };
+
   return (
     <div className="space-y-4">
       {toast && (
@@ -360,21 +459,39 @@ export function ExamManagerView({
         </div>
       )}
 
-      <div className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-base font-bold text-[#0F294A]">Daftar Ujian & Jadwal Pelaksanaan</h2>
           <p className="text-xs text-slate-500">
-            Kelola siklus ujian dari Draft, Terjadwal, Aktif, Selesai, hingga Arsip.
+            Kelola siklus ujian dari Draft, Terjadwal, Aktif, Selesai, impor massal soal/peserta, hingga ekspor.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openNewBuilder}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0F294A] hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
-        >
-          <Plus className="w-4 h-4" />
-          Buat Ujian Baru
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleExportExams('xlsx')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+            Ekspor Excel
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportExams('csv')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 bg-white text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-700" />
+            Ekspor CSV
+          </button>
+          <button
+            type="button"
+            onClick={openNewBuilder}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0F294A] hover:bg-blue-800 text-white text-xs font-semibold cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            Buat Ujian Baru
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-3">
@@ -411,6 +528,30 @@ export function ExamManagerView({
               </div>
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setImportExamTarget({ exam: ex, mode: 'EXAM_QUESTIONS' })}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-blue-200 bg-blue-50/60 text-xs font-medium text-blue-800 hover:bg-blue-100 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Impor Soal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setImportExamTarget({ exam: ex, mode: 'EXAM_PARTICIPANTS' })}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Impor Peserta
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleOpenPrintParticipants(ex)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  Cetak Peserta
+                </button>
                 <button
                   type="button"
                   onClick={() => openScheduleModal(ex)}
@@ -1028,6 +1169,56 @@ export function ExamManagerView({
           </div>
         </div>
       )}
+
+      <SpreadsheetImportModal
+        isOpen={Boolean(importExamTarget)}
+        onClose={() => setImportExamTarget(null)}
+        entityType={importExamTarget?.mode || 'EXAM_QUESTIONS'}
+        title={
+          importExamTarget?.mode === 'EXAM_PARTICIPANTS'
+            ? `Impor Daftar Peserta ke Ujian: ${importExamTarget.exam.title}`
+            : `Impor Daftar Soal ke Ujian: ${importExamTarget?.exam.title || ''}`
+        }
+        subtitle={
+          importExamTarget?.mode === 'EXAM_PARTICIPANTS'
+            ? 'Masukkan username/NIS siswa dari Excel/CSV ke ujian ini (siswa baru otomatis dibuatkan akun jika Nama Lengkap diisi).'
+            : 'Impor soal langsung ke ujian ini. Soal yang sudah ada di Bank Soal akan ditautkan otomatis tanpa duplikasi.'
+        }
+        existingKeys={new Set<string>()}
+        onImportSubmit={handleExamImportSubmit}
+      />
+
+      <PrintPreviewModal
+        isOpen={Boolean(printParticipantsData)}
+        onClose={() => setPrintParticipantsData(null)}
+        documentTitle={`DAFTAR PESERTA UJIAN: ${printParticipantsData?.exam.title || ''}`}
+        subtitle={`Bidang: ${printParticipantsData?.exam.subject || ''} · Durasi: ${printParticipantsData?.exam.duration || 0} Menit`}
+        activityName={printParticipantsData?.exam.title || ''}
+        authorName={currentUser.nama}
+        filePrefix={`Daftar_Peserta_${printParticipantsData?.exam.exam_id || 'Ujian'}`}
+        columns={[
+          { key: 'no', label: 'No', align: 'center' },
+          { key: 'username', label: 'Username / NIS' },
+          { key: 'nama', label: 'Nama Lengkap Peserta' },
+          { key: 'kelas', label: 'Kelas / Divisi' },
+          { key: 'status', label: 'Status Ujian', align: 'center' },
+          { key: 'paraf', label: 'Tanda Tangan / Ket.', align: 'center' },
+        ]}
+        rows={(printParticipantsData?.participants || []).map((p, idx) => ({
+          no: idx + 1,
+          username: p.username,
+          nama: p.nama,
+          kelas: p.kelas || '—',
+          status: p.status,
+          paraf: `${idx + 1}. ..............`,
+        }))}
+        summaryPairs={[
+          { label: 'Total Peserta Terdaftar', value: printParticipantsData?.participants.length || 0 },
+          { label: 'Jumlah Soal', value: printParticipantsData?.exam.total_questions || 0 },
+          { label: 'Durasi', value: `${printParticipantsData?.exam.duration || 0} Menit` },
+          { label: 'Status Ujian', value: printParticipantsData?.exam.status || '' },
+        ]}
+      />
     </div>
   );
 }

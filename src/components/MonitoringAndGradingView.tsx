@@ -2,15 +2,20 @@ import { useEffect, useState, type FormEvent } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Download,
+  FileSpreadsheet,
   MessageSquareWarning,
+  Printer,
   RefreshCw,
   RotateCcw,
   Search,
   ShieldAlert,
   StopCircle,
 } from 'lucide-react';
+import { PrintPreviewModal } from './PrintPreviewModal';
 import { RichMathRenderer } from './RichMathRenderer';
 import { apiFetch } from '../utils/api';
+import { exportMultiSheetExcel, exportRowsToCsv } from '../utils/exporters';
 import { safeJsonParse } from '../shared/grading';
 import type { ExamRecord, QuestionOptionsPayload } from '../shared/types';
 
@@ -22,6 +27,7 @@ export function MonitoringView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [toast, setToast] = useState('');
+  const [printOpen, setPrintOpen] = useState(false);
 
   useEffect(() => {
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
@@ -70,6 +76,39 @@ export function MonitoringView() {
     }
     return true;
   });
+
+  const activeExam = exams.find((e) => e.exam_id === selectedExamId);
+
+  const handleExportMonitoring = (format: 'xlsx' | 'csv') => {
+    const statusRows = filtered.map((p, idx) => ({
+      No: idx + 1,
+      Username: String(p.username || ''),
+      Nama: String(p.nama || ''),
+      Kelas: String(p.kelas || ''),
+      Status: String(p.status || ''),
+      Dijawab: Number(p.answered_count || 0),
+      Sisa_Menit: Math.floor(Number(p.remaining_seconds || 0) / 60),
+      Jumlah_Pelanggaran: Number(p.violation_count || 0),
+    }));
+    const violationRows = violations.map((v, idx) => ({
+      No: idx + 1,
+      Nama: String(v.nama || ''),
+      Username: String(v.username || ''),
+      Kelas: String(v.kelas || ''),
+      Jenis_Pelanggaran: String(v.event_type || ''),
+      Waktu: v.event_time ? new Date(String(v.event_time)).toLocaleString('id-ID') : '',
+      Keterangan: String(v.description || ''),
+    }));
+
+    if (format === 'csv') {
+      exportRowsToCsv(`Rekap_Pelanggaran_${selectedExamId || 'Ujian'}.csv`, violationRows);
+    } else {
+      exportMultiSheetExcel(`Monitoring_Pelanggaran_${selectedExamId || 'Ujian'}.xlsx`, [
+        { name: 'Rekap_Pelanggaran', rows: violationRows },
+        { name: 'Status_Peserta', rows: statusRows },
+      ]);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -120,14 +159,40 @@ export function MonitoringView() {
           </select>
         </div>
 
-        <button
-          type="button"
-          onClick={() => void loadMonitoring(selectedExamId)}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Segarkan Data
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => handleExportMonitoring('xlsx')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+            Excel Rekap
+          </button>
+          <button
+            type="button"
+            onClick={() => handleExportMonitoring('csv')}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-700" />
+            CSV Pelanggaran
+          </button>
+          <button
+            type="button"
+            onClick={() => setPrintOpen(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5" />
+            Cetak Rekap
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadMonitoring(selectedExamId)}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 hover:bg-slate-50 cursor-pointer"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Segarkan Data
+          </button>
+        </div>
       </div>
 
       {/* Participant Live Status Table */}
@@ -272,6 +337,38 @@ export function MonitoringView() {
           </div>
         )}
       </div>
+
+      <PrintPreviewModal
+        isOpen={printOpen}
+        onClose={() => setPrintOpen(false)}
+        documentTitle={`REKAPITULASI PELANGGARAN & PENGAWASAN UJIAN`}
+        subtitle={activeExam ? `Ujian: ${activeExam.title} · Bidang: ${activeExam.subject}` : ''}
+        activityName={activeExam?.title || 'Pengawasan Integritas CBT'}
+        authorName="Pengawas Ruang / Pembina KIR IPA"
+        filePrefix={`Rekap_Pelanggaran_${selectedExamId}`}
+        columns={[
+          { key: 'no', label: 'No', align: 'center' },
+          { key: 'nama', label: 'Nama Peserta' },
+          { key: 'kelas', label: 'Kelas' },
+          { key: 'event_type', label: 'Jenis Pelanggaran' },
+          { key: 'waktu', label: 'Waktu Kejadian' },
+          { key: 'description', label: 'Keterangan' },
+        ]}
+        rows={violations.map((v, i) => ({
+          no: i + 1,
+          nama: String(v.nama || '—'),
+          kelas: String(v.kelas || '—'),
+          event_type: String(v.event_type || ''),
+          waktu: v.event_time ? new Date(String(v.event_time)).toLocaleString('id-ID') : '—',
+          description: String(v.description || ''),
+        }))}
+        summaryPairs={[
+          { label: 'Total Peserta', value: participants.length },
+          { label: 'Selesai Mengumpulkan', value: participants.filter((p) => p.status === 'TERKUMPUL').length },
+          { label: 'Total Log Pelanggaran', value: violations.length },
+          { label: 'Peserta Tercatat Pelanggaran', value: participants.filter((p) => Number(p.violation_count || 0) > 0).length },
+        ]}
+      />
     </div>
   );
 }

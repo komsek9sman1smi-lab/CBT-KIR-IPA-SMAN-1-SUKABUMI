@@ -3,7 +3,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './auth.ts';
-import type { AppSettingsMap, ExamSettings } from '../shared/types.ts';
+import { createDefaultTemplatePayload } from '../shared/documentTemplates.ts';
+import type { AppSettingsMap, DocumentCategory, ExamSettings } from '../shared/types.ts';
 
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_PATH = path.join(DATA_DIR, 'cbt_kir_ipa.sqlite');
@@ -210,10 +211,37 @@ export function initializeDatabase(): DatabaseSync {
       locked_until TEXT NOT NULL DEFAULT '',
       last_attempt_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS REPORT_TEMPLATES (
+      template_id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      doc_category TEXT NOT NULL CHECK (doc_category IN ('LAPORAN_HASIL', 'BERITA_ACARA', 'PENGUMUMAN_PEMENANG')),
+      exam_id TEXT NOT NULL DEFAULT '',
+      is_default INTEGER NOT NULL DEFAULT 0,
+      content_json TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS OFFICIAL_DOCUMENTS (
+      doc_id TEXT PRIMARY KEY,
+      exam_id TEXT NOT NULL DEFAULT '',
+      template_id TEXT NOT NULL DEFAULT '',
+      doc_category TEXT NOT NULL CHECK (doc_category IN ('LAPORAN_HASIL', 'BERITA_ACARA', 'PENGUMUMAN_PEMENANG')),
+      title TEXT NOT NULL,
+      doc_number TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT', 'PUBLISHED')),
+      content_json TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   dbInstance = db;
   seedInitialData(db);
+  ensureDefaultReportTemplates(db, false);
   return db;
 }
 
@@ -743,6 +771,61 @@ function seedInitialData(db: DatabaseSync) {
   );
 }
 
+export function ensureDefaultReportTemplates(
+  db: DatabaseSync,
+  forceRestore = false,
+  actorUserId = 'usr_admin_01',
+) {
+  const existingCount = (db.prepare('SELECT COUNT(*) as c FROM REPORT_TEMPLATES').get() as { c: number }).c;
+  if (existingCount > 0 && !forceRestore) return;
+
+  const settings = getSettingsMap(db);
+  const ts = nowIso();
+  const defaults: Array<{
+    template_id: string;
+    name: string;
+    doc_category: DocumentCategory;
+  }> = [
+    {
+      template_id: 'tpl_default_laporan',
+      name: 'Template Standar Laporan Hasil Ujian',
+      doc_category: 'LAPORAN_HASIL',
+    },
+    {
+      template_id: 'tpl_default_berita_acara',
+      name: 'Template Resmi Berita Acara Pelaksanaan Ujian/Lomba',
+      doc_category: 'BERITA_ACARA',
+    },
+    {
+      template_id: 'tpl_default_pengumuman',
+      name: 'Template Surat Keputusan & Pengumuman Pemenang',
+      doc_category: 'PENGUMUMAN_PEMENANG',
+    },
+  ];
+
+  const upsert = db.prepare(
+    `INSERT INTO REPORT_TEMPLATES (template_id, name, doc_category, exam_id, is_default, content_json, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, '', 1, ?, ?, ?, ?)
+     ON CONFLICT(template_id) DO UPDATE SET
+       name = excluded.name,
+       content_json = excluded.content_json,
+       updated_at = excluded.updated_at`,
+  );
+
+  for (const d of defaults) {
+    const payload = createDefaultTemplatePayload(d.doc_category, settings);
+    upsert.run(
+      d.template_id,
+      d.name,
+      d.doc_category,
+      JSON.stringify(payload),
+      actorUserId,
+      ts,
+      ts,
+    );
+  }
+}
+
 export function createBackupSnapshot(db: DatabaseSync, createdBy: string) {
   if (!fs.existsSync(BACKUP_DIR)) {
     fs.mkdirSync(BACKUP_DIR, { recursive: true });
@@ -762,6 +845,8 @@ export function createBackupSnapshot(db: DatabaseSync, createdBy: string) {
     'ESSAY_GRADES',
     'EXAM_CATEGORIES',
     'NOTIFICATIONS',
+    'REPORT_TEMPLATES',
+    'OFFICIAL_DOCUMENTS',
   ];
   const snapshot: Record<string, unknown[]> = {};
   for (const t of tables) {
@@ -800,6 +885,8 @@ export function restoreBackupSnapshot(
     'ESSAY_GRADES',
     'EXAM_CATEGORIES',
     'NOTIFICATIONS',
+    'REPORT_TEMPLATES',
+    'OFFICIAL_DOCUMENTS',
   ];
 
   db.exec('BEGIN TRANSACTION;');

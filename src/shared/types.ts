@@ -214,3 +214,147 @@ export interface NotificationRecord {
   created_at: string;
   is_read: number;
 }
+
+export type DocumentCategory = 'LAPORAN_HASIL' | 'BERITA_ACARA' | 'PENGUMUMAN_PEMENANG';
+export type PaperSizeOption = 'A4' | 'F4';
+export type PaperOrientationOption = 'portrait' | 'landscape';
+export type DocumentSectionKind =
+  | 'heading'
+  | 'paragraph'
+  | 'info_grid'
+  | 'stats_cards'
+  | 'results_table'
+  | 'winners_table'
+  | 'violations_table'
+  | 'notes'
+  | 'divider';
+
+export interface DocumentTypographyConfig {
+  fontFamily: 'sans' | 'serif' | 'times' | 'georgia' | 'mono';
+  fontSizePx: number;
+  lineHeight: number;
+  headerAlign: 'left' | 'center' | 'right';
+  bodyAlign: 'left' | 'justify';
+}
+
+export interface DocumentPageConfig {
+  paperSize: PaperSizeOption;
+  orientation: PaperOrientationOption;
+  marginMm: number;
+}
+
+export interface DocumentLetterheadConfig {
+  showLogo: boolean;
+  logoUrl: string;
+  orgLine1: string;
+  orgLine2: string;
+  institutionName: string;
+  addressLine: string;
+  contactLine: string;
+  borderStyle: 'double' | 'solid' | 'none';
+}
+
+export interface DocumentMetaConfig {
+  title: string;
+  subtitle: string;
+  docNumber: string;
+  subjectLine: string;
+  activityName: string;
+  placeAndDate: string;
+}
+
+export interface DocumentSectionItem {
+  id: string;
+  kind: DocumentSectionKind;
+  title: string;
+  content: string;
+  align?: 'left' | 'center' | 'right' | 'justify';
+  bold?: boolean;
+  italic?: boolean;
+  visible: boolean;
+  tableColumns?: string[];
+  infoRows?: Array<{ label: string; value: string }>;
+}
+
+export interface DocumentSignatoryItem {
+  id: string;
+  roleLabel: string;
+  name: string;
+  titleOrNip: string;
+  align: 'left' | 'center' | 'right';
+}
+
+export interface DocumentWinnerRow {
+  rank: number;
+  user_id?: string;
+  nama: string;
+  kelas: string;
+  total_score: number;
+  max_score: number;
+  percentage: number;
+  kategori_juara: string;
+  keterangan?: string;
+}
+
+export interface DocumentHeaderFooterConfig {
+  headerText: string;
+  footerText: string;
+  showPageNumbers: boolean;
+}
+
+export interface DocumentContentPayload {
+  typography: DocumentTypographyConfig;
+  page: DocumentPageConfig;
+  letterhead: DocumentLetterheadConfig;
+  meta: DocumentMetaConfig;
+  sections: DocumentSectionItem[];
+  winnerRows: DocumentWinnerRow[];
+  signatories: DocumentSignatoryItem[];
+  headerFooter: DocumentHeaderFooterConfig;
+  showStampArea?: boolean;
+  tableHeaderBg?: string;
+}
+
+export interface ReportTemplateRecord {
+  template_id: string;
+  name: string;
+  doc_category: DocumentCategory;
+  exam_id: string;
+  is_default: number;
+  content_json: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OfficialDocumentRecord {
+  doc_id: string;
+  exam_id: string;
+  template_id: string;
+  doc_category: DocumentCategory;
+  title: string;
+  doc_number: string;
+  status: 'DRAFT' | 'PUBLISHED';
+  content_json: string;
+  created_by: string;
+  creator_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type ImportEntityType = 'USERS' | 'QUESTIONS' | 'EXAM_QUESTIONS' | 'EXAM_PARTICIPANTS';
+
+export interface ImportErrorDetail {
+  row: number;
+  reason: string;
+  identifier?: string;
+}
+
+export interface ImportSummaryResult {
+  imported: number;
+  linked?: number;
+  skipped_duplicates: number;
+  failed_count: number;
+  errors: ImportErrorDetail[];
+}
+

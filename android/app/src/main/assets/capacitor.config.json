@@ -7,8 +7,7 @@
 		"cleartext": false,
 		"androidScheme": "https",
 		"allowNavigation": [
-			"ais-pre-zrwv5jm7eg77wohqqgp37g-187876417707.asia-northeast1.run.app",
-			"*.run.app"
+			"*"
 		]
 	},
 	"android": {

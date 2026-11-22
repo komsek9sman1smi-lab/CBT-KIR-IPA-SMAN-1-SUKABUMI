@@ -37,8 +37,19 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK
+        run: |
+          SDK_DIR="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK_DIR" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_DIR" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$SDK_DIR/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1)"
+          if [ -z "$SDKMANAGER" ]; then
+            SDKMANAGER="$(command -v sdkmanager || true)"
+          fi
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+            "$SDKMANAGER" "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          fi
 
       - name: Install dependencies
         run: npm install
@@ -86,8 +97,10 @@ jobs:
           CAPACITOR_SERVER_URL: ${{ github.event.inputs.server_url || vars.CAPACITOR_SERVER_URL || 'https://ais-pre-zrwv5jm7eg77wohqqgp37g-187876417707.asia-northeast1.run.app' }}
         run: npx cap sync android
 
-      - name: Grant execute permission for Gradle
-        run: chmod +x android/gradlew
+      - name: Write local.properties and grant Gradle permission
+        run: |
+          echo "sdk.dir=${ANDROID_HOME}" > android/local.properties
+          chmod +x android/gradlew
 
       - name: Build Debug APK (Siap Install)
         working-directory: android

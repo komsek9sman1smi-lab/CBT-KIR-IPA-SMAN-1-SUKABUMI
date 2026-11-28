@@ -44,6 +44,7 @@ function include(filename) {
   ANSWERS: 'ANSWERS',
   VIOLATION_LOGS: 'VIOLATION_LOGS',
   RESULTS: 'RESULTS',
+  BASE_CONFIGURATION: 'BASE_CONFIGURATION',
   SETTINGS: 'SETTINGS',
   SESSIONS: 'SESSIONS',
   AUDIT_LOGS: 'AUDIT_LOGS',
@@ -122,8 +123,8 @@ function getAppSecret() {
   {
     path: 'Database.gs',
     folder: 'BACKEND',
-    description: 'Inisialisasi aman 22 sheet database, penanda DATABASE_INITIALIZED (anti-reset), dan migrasi skema aman tanpa menghapus data.',
-    content: `var GAS_DB_VERSION = '2.0.0';
+    description: 'Inisialisasi aman 23 sheet database (termasuk BASE_CONFIGURATION), penanda DATABASE_INITIALIZED (anti-reset), dan migrasi skema aman tanpa menghapus data.',
+    content: `var GAS_DB_VERSION = '3.0.0';
 
 var TABLE_SCHEMAS = {
   SYSTEM_METADATA: ['meta_key', 'meta_value', 'updated_at'],
@@ -138,6 +139,7 @@ var TABLE_SCHEMAS = {
   ANSWERS: ['answer_id', 'exam_id', 'user_id', 'question_id', 'answer_json', 'is_doubtful', 'saved_at', 'score'],
   VIOLATION_LOGS: ['log_id', 'exam_id', 'user_id', 'event_type', 'event_time', 'description'],
   RESULTS: ['result_id', 'exam_id', 'user_id', 'correct_count', 'incorrect_count', 'unanswered_count', 'total_score', 'published', 'graded_at'],
+  BASE_CONFIGURATION: ['config_key', 'config_value', 'source', 'config_version', 'updated_by', 'updated_at'],
   SETTINGS: ['setting_key', 'setting_value'],
   SESSIONS: ['session_id', 'user_id', 'exam_id', 'token_hash', 'created_at', 'expires_at', 'status'],
   AUDIT_LOGS: ['log_id', 'user_id', 'activity', 'timestamp', 'details'],
@@ -150,17 +152,21 @@ var TABLE_SCHEMAS = {
   OFFICIAL_DOCUMENTS: ['doc_id', 'exam_id', 'template_id', 'doc_category', 'title', 'doc_number', 'status', 'content_json', 'created_by', 'created_at', 'updated_at']
 };
 
-function setupDefaultSettings(ss) {
-  var sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
-  if (!sheet) throw new Error('Sheet SETTINGS tidak ditemukan.');
-  var existingRows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
-  var existingMap = {};
-  existingRows.forEach(function(r) { existingMap[String(r.setting_key)] = true; });
+function setupDefaultSettingsOnce(ss) {
+  var baseSheet = ss.getSheetByName(SHEET_NAMES.BASE_CONFIGURATION);
+  var settingsSheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+  if (!baseSheet || !settingsSheet) throw new Error('Sheet BASE_CONFIGURATION atau SETTINGS tidak ditemukan.');
+  var existingBase = readSheetAsObjects(SHEET_NAMES.BASE_CONFIGURATION);
+  var existingSettings = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+  if (existingBase.length > 0 || existingSettings.length > 0) {
+    return;
+  }
+  var ts = new Date().toISOString();
   Object.keys(DEFAULT_SETTINGS_GAS).forEach(function(k) {
-    if (!existingMap[k]) {
-      sheet.appendRow([k, DEFAULT_SETTINGS_GAS[k]]);
-    }
+    baseSheet.appendRow([k, DEFAULT_SETTINGS_GAS[k], 'INITIAL_DEFAULT', 1, 'system', ts]);
+    settingsSheet.appendRow([k, DEFAULT_SETTINGS_GAS[k]]);
   });
+  SpreadsheetApp.flush();
 }
 
 function initializeDatabase() {
@@ -183,11 +189,15 @@ function initializeDatabase() {
 
     var alreadyInit = props.getProperty('DATABASE_INITIALIZED') === 'true' || getMetaPropertyGas(ss, 'DATABASE_INITIALIZED') === 'true';
     var existingUsers = readSheetAsObjects(SHEET_NAMES.USERS);
-    if (alreadyInit && existingUsers.length === 0) {
-      throw new Error('Pencegahan Reset Aktif: Database sudah pernah diinisialisasi tetapi sheet USERS kosong.');
+    var existingBase = readSheetAsObjects(SHEET_NAMES.BASE_CONFIGURATION);
+    var existingSettings = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+    if (alreadyInit && (existingUsers.length === 0 || (existingBase.length === 0 && existingSettings.length === 0))) {
+      throw new Error('Pencegahan Reset Aktif: Database sudah pernah diinisialisasi tetapi USERS atau BASE_CONFIGURATION kosong.');
     }
 
-    setupDefaultSettings(ss);
+    if (!alreadyInit) {
+      setupDefaultSettingsOnce(ss);
+    }
     migrateDatabaseSafely(ss);
 
     if (!alreadyInit) {
@@ -200,6 +210,8 @@ function initializeDatabase() {
       setMetaPropertyGas(ss, 'INSTALLATION_ID', instId);
       setMetaPropertyGas(ss, 'DATABASE_VERSION', GAS_DB_VERSION);
       setMetaPropertyGas(ss, 'CONFIG_VERSION', '1');
+      setMetaPropertyGas(ss, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT');
+      setMetaPropertyGas(ss, 'BASE_CONFIG_UPDATED_AT', ts);
       setMetaPropertyGas(ss, 'LAST_SAVE_AT', ts);
     }
     return { ok: true, spreadsheetUrl: ss.getUrl(), initialized: true };
@@ -211,15 +223,23 @@ function initializeDatabase() {
 function migrateDatabaseSafely(ss) {
   var spreadsheet = ss || getSpreadsheet();
   var props = PropertiesService.getScriptProperties();
-  var currentVer = props.getProperty('DATABASE_VERSION') || '';
+  var currentVer = props.getProperty('DATABASE_VERSION') || getMetaPropertyGas(spreadsheet, 'DATABASE_VERSION') || '';
   if (currentVer === GAS_DB_VERSION) return { ok: true, migrated: false };
 
-  // Buat backup spreadsheet sebelum menambah kolom baru
+  // Buat backup spreadsheet sebelum migrasi skema
   spreadsheet.copy('AUTO_PRE_MIGRATION_CBT_KIR_IPA_' + Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd_HHmmss'));
 
   Object.keys(TABLE_SCHEMAS).forEach(function(sheetName) {
     var sheet = spreadsheet.getSheetByName(sheetName);
-    if (!sheet || sheet.getLastRow() === 0) return;
+    if (!sheet) {
+      sheet = spreadsheet.insertSheet(sheetName);
+    }
+    if (sheet.getLastRow() === 0) {
+      sheet.appendRow(TABLE_SCHEMAS[sheetName]);
+      sheet.getRange(1, 1, 1, TABLE_SCHEMAS[sheetName].length).setFontWeight('bold');
+      sheet.setFrozenRows(1);
+      return;
+    }
     var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     TABLE_SCHEMAS[sheetName].forEach(function(colName) {
       if (existingHeaders.indexOf(colName) === -1) {
@@ -229,6 +249,22 @@ function migrateDatabaseSafely(ss) {
       }
     });
   });
+
+  // Salin konfigurasi existing dari SETTINGS ke BASE_CONFIGURATION tanpa menimpa perubahan
+  var baseSheet = spreadsheet.getSheetByName(SHEET_NAMES.BASE_CONFIGURATION);
+  var baseRows = readSheetAsObjects(SHEET_NAMES.BASE_CONFIGURATION);
+  var baseMap = {};
+  baseRows.forEach(function(r) { baseMap[String(r.config_key)] = true; });
+  var settingsRows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+  var verNow = Number(getMetaPropertyGas(spreadsheet, 'CONFIG_VERSION') || 1);
+  var ts = new Date().toISOString();
+  settingsRows.forEach(function(r) {
+    var k = String(r.setting_key || '');
+    if (k && !baseMap[k]) {
+      baseSheet.appendRow([k, String(r.setting_value || ''), 'MIGRATED_SETTINGS', verNow, 'migration', ts]);
+    }
+  });
+  SpreadsheetApp.flush();
 
   props.setProperty('DATABASE_VERSION', GAS_DB_VERSION);
   setMetaPropertyGas(spreadsheet, 'DATABASE_VERSION', GAS_DB_VERSION);
@@ -372,21 +408,45 @@ function setMetaPropertyGas(ss, key, val) {
   SpreadsheetApp.flush();
 }
 
-function invalidateSettingsCache(keys) {
+function getCurrentConfigVersionGas(ss) {
+  return Number(getMetaPropertyGas(ss || null, 'CONFIG_VERSION') || 1);
+}
+
+function invalidateSettingsCache(keys, versionHint) {
   var cache = CacheService.getScriptCache();
+  var ver = versionHint || getCurrentConfigVersionGas();
   var list = keys || Object.keys(DEFAULT_SETTINGS_GAS);
-  list.forEach(function(k) { cache.remove('SETTING_' + k); });
+  list.forEach(function(k) {
+    cache.remove('SETTING_V' + ver + '_' + k);
+    cache.remove('SETTING_V' + (ver - 1) + '_' + k);
+    cache.remove('SETTING_' + k);
+  });
 }
 
 function getSetting(key, fallback) {
+  var ss = getSpreadsheet();
+  var ver = getCurrentConfigVersionGas(ss);
   var cache = CacheService.getScriptCache();
-  var cached = cache.get('SETTING_' + key);
+  var cacheKey = 'SETTING_V' + ver + '_' + key;
+  var cached = cache.get(cacheKey);
   if (cached !== null) return cached;
+
+  var baseRows = ss.getSheetByName(SHEET_NAMES.BASE_CONFIGURATION)
+    ? readSheetAsObjects(SHEET_NAMES.BASE_CONFIGURATION)
+    : [];
+  for (var i = 0; i < baseRows.length; i++) {
+    if (String(baseRows[i].config_key) === String(key)) {
+      var val = String(baseRows[i].config_value || '');
+      cache.put(cacheKey, val, 300);
+      return val;
+    }
+  }
   var rows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
-  for (var i = 0; i < rows.length; i++) {
-    if (rows[i].setting_key === key) {
-      cache.put('SETTING_' + key, String(rows[i].setting_value), 300);
-      return String(rows[i].setting_value);
+  for (var j = 0; j < rows.length; j++) {
+    if (String(rows[j].setting_key) === String(key)) {
+      var sVal = String(rows[j].setting_value || '');
+      cache.put(cacheKey, sVal, 300);
+      return sVal;
     }
   }
   return fallback || '';
@@ -804,11 +864,32 @@ function getMonitoringSnapshot(token, examId) {
 }
 
 function getPublicConfig() {
-  var rows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+  var ss = getSpreadsheet();
+  var baseRows = ss.getSheetByName(SHEET_NAMES.BASE_CONFIGURATION)
+    ? readSheetAsObjects(SHEET_NAMES.BASE_CONFIGURATION)
+    : [];
+  var settingsRows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+  var initialized = PropertiesService.getScriptProperties().getProperty('DATABASE_INITIALIZED') === 'true' ||
+    getMetaPropertyGas(ss, 'DATABASE_INITIALIZED') === 'true';
+
+  if (initialized && baseRows.length === 0 && settingsRows.length === 0) {
+    throw new Error('BASE_CONFIGURATION kosong padahal database sudah aktif. Sistem memblokir fallback ke pengaturan awal.');
+  }
+
   var cfg = {};
-  Object.keys(DEFAULT_SETTINGS_GAS).forEach(function(k) { cfg[k] = DEFAULT_SETTINGS_GAS[k]; });
-  rows.forEach(function(r) { cfg[r.setting_key] = String(r.setting_value || ''); });
-  cfg.config_version = Number(getMetaPropertyGas(null, 'CONFIG_VERSION') || 1);
+  if (baseRows.length > 0) {
+    baseRows.forEach(function(r) { cfg[String(r.config_key)] = String(r.config_value || ''); });
+  } else {
+    settingsRows.forEach(function(r) { cfg[String(r.setting_key)] = String(r.setting_value || ''); });
+  }
+
+  Object.keys(DEFAULT_SETTINGS_GAS).forEach(function(k) {
+    if (cfg[k] === undefined) cfg[k] = DEFAULT_SETTINGS_GAS[k];
+  });
+
+  cfg.config_version = Number(getMetaPropertyGas(ss, 'CONFIG_VERSION') || 1);
+  cfg.base_config_source = getMetaPropertyGas(ss, 'BASE_CONFIG_SOURCE') || 'INITIAL_DEFAULT';
+  cfg.base_config_updated_at = getMetaPropertyGas(ss, 'BASE_CONFIG_UPDATED_AT') || '';
   return cfg;
 }
 
@@ -823,35 +904,101 @@ function saveAppSettings(token, updates, expectedVersion) {
       throw new Error('Konflik versi konfigurasi: versi server #' + currentVer + ', versi klien #' + expectedVersion);
     }
     var current = getPublicConfig();
-    var nextVer = currentVer + 1;
-    var ts = new Date().toISOString();
+    var changedKeys = [];
+    var validatedValues = {};
     Object.keys(updates || {}).forEach(function(k) {
+      if (updates[k] === undefined || updates[k] === null) return;
       var nextVal = String(updates[k]);
+      if ((k === 'app_name' || k === 'school_name' || k === 'org_name') && !nextVal.trim()) {
+        throw new Error('Pengaturan "' + k + '" tidak boleh kosong.');
+      }
       var oldVal = String(current[k] || '');
       if (nextVal !== oldVal) {
-        var updated = updateRowByKey(SHEET_NAMES.SETTINGS, 'setting_key', k, { setting_value: nextVal });
-        if (!updated) {
-          appendRowObject(SHEET_NAMES.SETTINGS, { setting_key: k, setting_value: nextVal });
-        }
-        appendRowObject(SHEET_NAMES.CONFIG_VERSIONS, {
-          version_id: generateId('cfgv'),
-          version_number: nextVer,
-          setting_key: k,
-          category: 'APP',
-          old_value: oldVal,
-          new_value: nextVal,
-          changed_by: auth.user.user_id,
-          changed_at: ts,
-          status: 'APPLIED',
-          note: ''
-        });
+        changedKeys.push(k);
+        validatedValues[k] = nextVal;
       }
     });
+
+    if (changedKeys.length === 0) {
+      return {
+        ok: true,
+        verified: true,
+        config_version: currentVer,
+        base_config_source: current.base_config_source || 'INITIAL_DEFAULT',
+        changed_keys: [],
+        settings: current
+      };
+    }
+
+    var nextVer = currentVer + 1;
+    var ts = new Date().toISOString();
+    changedKeys.forEach(function(k) {
+      var nextVal = validatedValues[k];
+      var oldVal = String(current[k] || '');
+
+      var baseUpdated = updateRowByKey(SHEET_NAMES.BASE_CONFIGURATION, 'config_key', k, {
+        config_value: nextVal,
+        source: 'SUPER_ADMIN',
+        config_version: nextVer,
+        updated_by: auth.user.user_id,
+        updated_at: ts
+      });
+      if (!baseUpdated) {
+        appendRowObject(SHEET_NAMES.BASE_CONFIGURATION, {
+          config_key: k,
+          config_value: nextVal,
+          source: 'SUPER_ADMIN',
+          config_version: nextVer,
+          updated_by: auth.user.user_id,
+          updated_at: ts
+        });
+      }
+
+      var settingUpdated = updateRowByKey(SHEET_NAMES.SETTINGS, 'setting_key', k, { setting_value: nextVal });
+      if (!settingUpdated) {
+        appendRowObject(SHEET_NAMES.SETTINGS, { setting_key: k, setting_value: nextVal });
+      }
+
+      appendRowObject(SHEET_NAMES.CONFIG_VERSIONS, {
+        version_id: generateId('cfgv'),
+        version_number: nextVer,
+        setting_key: k,
+        category: (k === 'max_login_attempts' || k === 'lockout_minutes' || k === 'session_hours' || k === 'professor_global_access') ? 'SECURITY' : 'APP',
+        old_value: oldVal,
+        new_value: nextVal,
+        changed_by: auth.user.user_id,
+        changed_at: ts,
+        status: 'APPLIED',
+        note: ''
+      });
+    });
+
     setMetaPropertyGas(ss, 'CONFIG_VERSION', String(nextVer));
+    setMetaPropertyGas(ss, 'BASE_CONFIG_SOURCE', 'SUPER_ADMIN');
+    setMetaPropertyGas(ss, 'BASE_CONFIG_UPDATED_AT', ts);
     setMetaPropertyGas(ss, 'LAST_SAVE_AT', ts);
-    invalidateSettingsCache(Object.keys(updates || {}));
-    recordAudit(auth.user.user_id, 'SETTINGS_UPDATE', { version: nextVer, keys: Object.keys(updates || {}) });
-    return { ok: true, config_version: nextVer, settings: getPublicConfig() };
+    SpreadsheetApp.flush();
+
+    // Read-back verification dari BASE_CONFIGURATION sebelum mengonfirmasi ke klien
+    var verifyRows = readSheetAsObjects(SHEET_NAMES.BASE_CONFIGURATION);
+    var verifyMap = {};
+    verifyRows.forEach(function(r) { verifyMap[String(r.config_key)] = String(r.config_value || ''); });
+    changedKeys.forEach(function(k) {
+      if (verifyMap[k] !== validatedValues[k]) {
+        throw new Error('Verifikasi read-back gagal untuk ' + k + ' setelah penulisan Spreadsheet.');
+      }
+    });
+
+    invalidateSettingsCache(changedKeys, nextVer);
+    recordAudit(auth.user.user_id, 'SETTINGS_UPDATE', { version: nextVer, source: 'SUPER_ADMIN', keys: changedKeys });
+    return {
+      ok: true,
+      verified: true,
+      config_version: nextVer,
+      base_config_source: 'SUPER_ADMIN',
+      changed_keys: changedKeys,
+      settings: getPublicConfig()
+    };
   } finally {
     lock.releaseLock();
   }
@@ -882,6 +1029,8 @@ function getSyncVersion() {
   return {
     server_time: new Date().toISOString(),
     config_version: Number(getMetaPropertyGas(ss, 'CONFIG_VERSION') || 1),
+    base_config_source: getMetaPropertyGas(ss, 'BASE_CONFIG_SOURCE') || 'INITIAL_DEFAULT',
+    base_config_updated_at: getMetaPropertyGas(ss, 'BASE_CONFIG_UPDATED_AT') || '',
     last_save_at: getMetaPropertyGas(ss, 'LAST_SAVE_AT')
   };
 }

@@ -135,13 +135,13 @@ export function AppShell({
       {/* Desktop Sidebar */}
       <aside className="hidden lg:flex lg:w-[260px] lg:flex-col lg:fixed lg:inset-y-0 bg-[#0F294A] text-white border-r border-slate-800 no-print">
         <div className="p-4 border-b border-white/10 flex items-center gap-3">
-          <AppLogo src={config.logo_url} sizeClass="w-10 h-10" />
+          <AppLogo src={config.logo_url} alt={config.app_name || 'Logo Aplikasi'} sizeClass="w-10 h-10" />
           <div className="min-w-0">
             <div className="text-sm font-bold leading-tight truncate text-white">
-              {config.app_name || 'CBT KIR IPA'}
+              {config.app_name || (connectionError ? 'Gangguan Server' : 'Memuat Konfigurasi...')}
             </div>
             <div className="text-xs text-amber-300 truncate">
-              {config.school_name || 'SMAN 1 Sukabumi'}
+              {config.school_name || ''}
             </div>
           </div>
         </div>
@@ -192,9 +192,11 @@ export function AppShell({
           />
           <aside className="relative w-72 max-w-[85vw] bg-[#0F294A] text-white flex flex-col h-full z-10">
             <div className="p-4 border-b border-white/10 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <AppLogo src={config.logo_url} sizeClass="w-9 h-9" />
-                <span className="font-bold text-sm">CBT KIR IPA</span>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <AppLogo src={config.logo_url} alt={config.app_name || 'Logo Aplikasi'} sizeClass="w-9 h-9" />
+                <span className="font-bold text-sm truncate">
+                  {config.app_name || 'Memuat Konfigurasi...'}
+                </span>
               </div>
               <button
                 type="button"
@@ -257,7 +259,7 @@ export function AppShell({
                 {activeItem.label}
               </h1>
               <p className="text-xs text-slate-500 truncate hidden sm:block">
-                {config.app_name || 'CBT KIR IPA SMAN 1 SUKABUMI'} · {roleLabel}
+                {config.app_name || (connectionError ? 'Gangguan Database Server' : 'Memuat Konfigurasi...')} · {roleLabel}
               </p>
             </div>
           </div>

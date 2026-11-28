@@ -7,8 +7,8 @@ interface AppLogoProps {
 }
 
 export function AppLogo({
-  src = '/src/assets/images/kir_ipa_logo_1795216569338.jpg',
-  alt = 'Logo KIR IPA SMAN 1 Sukabumi',
+  src,
+  alt = 'Logo Aplikasi',
   sizeClass = 'w-10 h-10',
 }: AppLogoProps) {
   const [failed, setFailed] = useState(false);
@@ -22,6 +22,7 @@ export function AppLogo({
       <div
         className={`${sizeClass} rounded-lg bg-[#0F294A] text-amber-400 flex items-center justify-center font-display font-bold border border-amber-500/40 shrink-0`}
         aria-label={alt}
+        title={failed ? 'Berkas logo gagal dimuat dari server' : 'Logo belum dikonfigurasi'}
       >
         KIR
       </div>

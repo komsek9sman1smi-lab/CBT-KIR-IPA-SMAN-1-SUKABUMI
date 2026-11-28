@@ -7,6 +7,7 @@ import { createDefaultTemplatePayload } from '../shared/documentTemplates.ts';
 import type {
   AppSettingsMap,
   BackupLogRecord,
+  BaseConfigSource,
   ConfigVersionRecord,
   DocumentCategory,
   ExamSettings,
@@ -17,8 +18,8 @@ import type {
   SystemSyncState,
 } from '../shared/types.ts';
 
-export const APP_VERSION = '2.2.0';
-export const DB_SCHEMA_VERSION = '2.0.0';
+export const APP_VERSION = '2.3.0';
+export const DB_SCHEMA_VERSION = '3.0.0';
 export const FACTORY_RESET_CONFIRMATION_PHRASE = 'RESET PABRIK CBT KIR IPA';
 
 export interface DbPathsConfig {
@@ -29,10 +30,15 @@ export interface DbPathsConfig {
 }
 
 export function getDefaultDbPaths(): DbPathsConfig {
-  const dataDir = path.resolve(process.cwd(), 'data');
+  const explicitDb = process.env.CBT_DB_PATH ? path.resolve(process.env.CBT_DB_PATH) : '';
+  const dataDir = process.env.CBT_DATA_DIR
+    ? path.resolve(process.env.CBT_DATA_DIR)
+    : explicitDb
+      ? path.dirname(explicitDb)
+      : path.resolve(process.cwd(), 'data');
   return {
     dataDir,
-    dbPath: path.join(dataDir, 'cbt_kir_ipa.sqlite'),
+    dbPath: explicitDb || path.join(dataDir, 'cbt_kir_ipa.sqlite'),
     backupDir: path.join(dataDir, 'backups'),
     uploadsDir: path.join(dataDir, 'uploads'),
   };
@@ -183,6 +189,15 @@ function createCoreSchema(db: DatabaseSync) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS BASE_CONFIGURATION (
+      config_key TEXT PRIMARY KEY,
+      config_value TEXT NOT NULL,
+      source TEXT NOT NULL DEFAULT 'INITIAL_DEFAULT' CHECK (source IN ('INITIAL_DEFAULT', 'MIGRATED_SETTINGS', 'SUPER_ADMIN', 'ROLLBACK', 'RESTORE')),
+      config_version INTEGER NOT NULL DEFAULT 1,
+      updated_by TEXT NOT NULL DEFAULT 'system_init',
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS APP_ASSETS (
       asset_id TEXT PRIMARY KEY,
       asset_type TEXT NOT NULL,
@@ -191,6 +206,7 @@ function createCoreSchema(db: DatabaseSync) {
       size_bytes INTEGER NOT NULL,
       sha256 TEXT NOT NULL,
       file_path TEXT NOT NULL,
+      content_base64 TEXT NOT NULL DEFAULT '',
       created_by TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -402,6 +418,7 @@ function createCoreSchema(db: DatabaseSync) {
   addColumnIfMissing(db, 'BACKUP_LOGS', 'size_bytes', 'INTEGER NOT NULL DEFAULT 0');
   addColumnIfMissing(db, 'BACKUP_LOGS', 'checksum_sha256', "TEXT NOT NULL DEFAULT ''");
   addColumnIfMissing(db, 'QUESTIONS', 'materi', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(db, 'APP_ASSETS', 'content_base64', "TEXT NOT NULL DEFAULT ''");
 }
 
 interface MigrationStep {
@@ -426,6 +443,43 @@ const MIGRATIONS: MigrationStep[] = [
       addColumnIfMissing(db, 'BACKUP_LOGS', 'size_bytes', 'INTEGER NOT NULL DEFAULT 0');
       addColumnIfMissing(db, 'BACKUP_LOGS', 'checksum_sha256', "TEXT NOT NULL DEFAULT ''");
       addColumnIfMissing(db, 'QUESTIONS', 'materi', "TEXT NOT NULL DEFAULT ''");
+    },
+  },
+  {
+    version: '003_permanent_base_configuration',
+    description: 'Migrasi SETTINGS ke tabel BASE_CONFIGURATION permanen dan cadangan biner APP_ASSETS',
+    apply: (db) => {
+      addColumnIfMissing(db, 'APP_ASSETS', 'content_base64', "TEXT NOT NULL DEFAULT ''");
+      const existingSettings = db
+        .prepare('SELECT setting_key, setting_value FROM SETTINGS')
+        .all() as Array<{ setting_key: string; setting_value: string }>;
+      const cfgVer = Math.max(1, Number(getMetaValue(db, 'CONFIG_VERSION', '1')) || 1);
+      const hasEdits =
+        cfgVer > 1 ||
+        ((db.prepare('SELECT COUNT(*) as c FROM CONFIG_VERSIONS').get() as { c: number }).c > 0);
+      const source: BaseConfigSource = hasEdits ? 'SUPER_ADMIN' : 'MIGRATED_SETTINGS';
+      const ts = nowIso();
+      const upsertBase = db.prepare(
+        `INSERT OR IGNORE INTO BASE_CONFIGURATION (config_key, config_value, source, config_version, updated_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      for (const s of existingSettings) {
+        upsertBase.run(s.setting_key, s.setting_value, source, cfgVer, hasEdits ? 'super_admin' : 'system_migration', ts);
+      }
+      // Backfill APP_ASSETS content_base64 if files currently exist on disk
+      const assets = db
+        .prepare('SELECT asset_id, file_path, content_base64 FROM APP_ASSETS')
+        .all() as Array<{ asset_id: string; file_path: string; content_base64: string }>;
+      for (const a of assets) {
+        if (!a.content_base64 && a.file_path && fs.existsSync(a.file_path)) {
+          try {
+            const b64 = fs.readFileSync(a.file_path).toString('base64');
+            db.prepare('UPDATE APP_ASSETS SET content_base64 = ? WHERE asset_id = ?').run(b64, a.asset_id);
+          } catch {
+            // Keep migration non-fatal if an old asset file was external
+          }
+        }
+      }
     },
   },
 ];
@@ -475,6 +529,14 @@ function runSafeMigrations(db: DatabaseSync, backupDir: string, existingHasData:
 
 function ensureSystemMetadataDefaults(db: DatabaseSync) {
   const ts = nowIso();
+  const baseCount = (db.prepare('SELECT COUNT(*) as c FROM BASE_CONFIGURATION').get() as { c: number }).c;
+  const superAdminEdited =
+    baseCount > 0 &&
+    ((
+      db
+        .prepare("SELECT COUNT(*) as c FROM BASE_CONFIGURATION WHERE source != 'INITIAL_DEFAULT'")
+        .get() as { c: number }
+    ).c > 0);
   const defaults: Record<string, string> = {
     DATABASE_INITIALIZED: 'true',
     DATABASE_VERSION: DB_SCHEMA_VERSION,
@@ -485,6 +547,9 @@ function ensureSystemMetadataDefaults(db: DatabaseSync) {
     LAST_SAVE_AT: ts,
     LAST_SYNC_CHECK_AT: ts,
     CONFIG_VERSION: '1',
+    BASE_CONFIG_SOURCE: superAdminEdited ? 'SUPER_ADMIN' : 'INITIAL_DEFAULT',
+    BASE_CONFIG_UPDATED_AT: ts,
+    BASE_CONFIG_UPDATED_BY: superAdminEdited ? 'super_admin' : 'system_init',
     SYNC_VERSION_CONFIG: '1',
     SYNC_VERSION_USERS: '1',
     SYNC_VERSION_QUESTIONS: '1',
@@ -536,19 +601,20 @@ export function openAndInitializeDatabase(paths: DbPathsConfig = getDefaultDbPat
   const initializedMeta = getMetaValue(db, 'DATABASE_INITIALIZED', '');
   const existingUsers = (db.prepare('SELECT COUNT(*) as c FROM USERS').get() as { c: number }).c;
   const existingSettings = (db.prepare('SELECT COUNT(*) as c FROM SETTINGS').get() as { c: number }).c;
+  const existingBaseCfg = (db.prepare('SELECT COUNT(*) as c FROM BASE_CONFIGURATION').get() as { c: number }).c;
   const existingExams = (db.prepare('SELECT COUNT(*) as c FROM EXAMS').get() as { c: number }).c;
-  const existingHasData = existingUsers > 0 || existingSettings > 0 || existingExams > 0;
+  const existingHasData = existingUsers > 0 || existingSettings > 0 || existingBaseCfg > 0 || existingExams > 0;
 
   // Anti-reset check: if DB was previously marked initialized, NEVER auto-reseed if core tables are unexpectedly empty
-  if (initializedMeta === 'true' && (existingUsers === 0 || existingSettings === 0)) {
+  if (initializedMeta === 'true' && (existingUsers === 0 || (existingSettings === 0 && existingBaseCfg === 0))) {
     const msg =
-      'Pencegahan Reset Aktif: Database sudah pernah diinisialisasi namun tabel USERS/SETTINGS kosong. Sistem menolak reset otomatis ke pengaturan awal.';
+      'Pencegahan Reset Aktif: Database sudah pernah diinisialisasi namun tabel USERS/BASE_CONFIGURATION kosong. Sistem menolak reset otomatis ke pengaturan awal.';
     recordServerEvent(db, {
       level: 'CRITICAL',
       source: 'initializeDatabase',
       event_type: 'BLOCKED_SILENT_RESEED',
       message: msg,
-      details: { existingUsers, existingSettings, fileExistedBefore, fileSizeBefore },
+      details: { existingUsers, existingSettings, existingBaseCfg, fileExistedBefore, fileSizeBefore },
     });
     lastDbErrorMessage = msg;
     throw new DatabasePersistenceError(msg, 'DB_EMPTY_AFTER_INIT');
@@ -559,13 +625,29 @@ export function openAndInitializeDatabase(paths: DbPathsConfig = getDefaultDbPat
 
   if (initializedMeta === 'true' || existingHasData) {
     // Existing database (either already hardened or upgrading from pre-hardening DB):
-    // NEVER wipe or overwrite existing SETTINGS or USERS!
-    // Only fill missing new setting keys with INSERT OR IGNORE.
+    // NEVER wipe, overwrite, or reset BASE_CONFIGURATION, SETTINGS, or USERS!
+    // Only fill genuinely missing new schema keys if absent from both tables.
+    const ts = nowIso();
+    const insertMissingBase = db.prepare(
+      "INSERT OR IGNORE INTO BASE_CONFIGURATION (config_key, config_value, source, config_version, updated_by, updated_at) VALUES (?, ?, ?, 1, 'system_upgrade', ?)",
+    );
     const insertMissingSetting = db.prepare(
       'INSERT OR IGNORE INTO SETTINGS (setting_key, setting_value) VALUES (?, ?)',
     );
+    const existingSettingsMap = new Map<string, string>();
+    for (const r of db.prepare('SELECT setting_key, setting_value FROM SETTINGS').all() as Array<{ setting_key: string; setting_value: string }>) {
+      existingSettingsMap.set(r.setting_key, r.setting_value);
+    }
+    const existingBaseMap = new Map<string, string>();
+    for (const r of db.prepare('SELECT config_key, config_value FROM BASE_CONFIGURATION').all() as Array<{ config_key: string; config_value: string }>) {
+      existingBaseMap.set(r.config_key, r.config_value);
+    }
+
     for (const [k, v] of Object.entries(DEFAULT_APP_SETTINGS)) {
-      insertMissingSetting.run(k, v);
+      const val = existingBaseMap.get(k) ?? existingSettingsMap.get(k) ?? v;
+      const src: BaseConfigSource = existingSettingsMap.has(k) ? 'MIGRATED_SETTINGS' : 'INITIAL_DEFAULT';
+      insertMissingBase.run(k, val, src, ts);
+      insertMissingSetting.run(k, val);
     }
     ensureDefaultReportTemplates(db, false);
     ensureSystemMetadataDefaults(db);
@@ -631,32 +713,47 @@ const SECURITY_SETTING_KEYS = new Set<string>([
   'professor_global_access',
 ]);
 
-export function getSettingsMap(db: DatabaseSync, options: { strict?: boolean } = {}): AppSettingsMap {
-  let rows: Array<{ setting_key: string; setting_value: string }>;
+export function getBaseConfigurationMap(
+  db: DatabaseSync,
+  options: { strict?: boolean } = {},
+): AppSettingsMap {
+  let baseRows: Array<{ config_key: string; config_value: string }>;
   try {
-    rows = db.prepare('SELECT setting_key, setting_value FROM SETTINGS').all() as Array<{
-      setting_key: string;
-      setting_value: string;
+    baseRows = db.prepare('SELECT config_key, config_value FROM BASE_CONFIGURATION').all() as Array<{
+      config_key: string;
+      config_value: string;
     }>;
   } catch (err) {
-    const msg = 'Gagal membaca tabel konfigurasi SETTINGS dari database server.';
+    const msg = 'Gagal membaca BASE_CONFIGURATION dari database server.';
     recordServerEvent(db, {
       level: 'CRITICAL',
-      source: 'getSettingsMap',
-      event_type: 'SETTINGS_READ_ERROR',
+      source: 'getBaseConfigurationMap',
+      event_type: 'BASE_CONFIG_READ_ERROR',
       message: msg,
       details: { error: err instanceof Error ? err.message : String(err) },
     });
-    throw new DatabasePersistenceError(msg, 'SETTINGS_READ_ERROR');
+    throw new DatabasePersistenceError(msg, 'BASE_CONFIG_READ_ERROR');
+  }
+
+  let settingRows: Array<{ setting_key: string; setting_value: string }> = [];
+  if (baseRows.length === 0) {
+    try {
+      settingRows = db.prepare('SELECT setting_key, setting_value FROM SETTINGS').all() as Array<{
+        setting_key: string;
+        setting_value: string;
+      }>;
+    } catch {
+      settingRows = [];
+    }
   }
 
   const initialized = getMetaValue(db, 'DATABASE_INITIALIZED', '') === 'true';
-  if ((initialized || options.strict) && rows.length === 0) {
+  if ((initialized || options.strict) && baseRows.length === 0 && settingRows.length === 0) {
     const msg =
-      'Tabel SETTINGS kosong padahal database sudah aktif. Sistem memblokir fallback ke pengaturan awal.';
+      'BASE_CONFIGURATION kosong padahal database sudah aktif. Sistem memblokir fallback ke pengaturan awal.';
     recordServerEvent(db, {
       level: 'CRITICAL',
-      source: 'getSettingsMap',
+      source: 'getBaseConfigurationMap',
       event_type: 'SETTINGS_EMPTY_AFTER_INIT',
       message: msg,
     });
@@ -664,16 +761,27 @@ export function getSettingsMap(db: DatabaseSync, options: { strict?: boolean } =
   }
 
   const map: Record<string, string> = {};
-  for (const r of rows) {
-    map[r.setting_key] = r.setting_value;
+  if (baseRows.length > 0) {
+    for (const r of baseRows) {
+      map[r.config_key] = r.config_value;
+    }
+  } else {
+    for (const r of settingRows) {
+      map[r.setting_key] = r.setting_value;
+    }
   }
-  // Only supply default for keys that have never been stored yet (never overwrite stored values)
+
+  // Only populate keys genuinely absent from both tables (never overwrite any stored value)
   for (const [k, v] of Object.entries(DEFAULT_APP_SETTINGS)) {
     if (map[k] === undefined) {
       map[k] = v;
     }
   }
   return map as unknown as AppSettingsMap;
+}
+
+export function getSettingsMap(db: DatabaseSync, options: { strict?: boolean } = {}): AppSettingsMap {
+  return getBaseConfigurationMap(db, options);
 }
 
 export function getConfigVersion(db: DatabaseSync): number {
@@ -718,20 +826,69 @@ export function getSyncState(db: DatabaseSync): SystemSyncState {
     app_version: getMetaValue(db, 'APP_VERSION', APP_VERSION),
     db_version: getMetaValue(db, 'DATABASE_VERSION', DB_SCHEMA_VERSION),
     config_version: getConfigVersion(db),
+    base_config_source: (getMetaValue(db, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT') as BaseConfigSource),
+    base_config_updated_at: getMetaValue(db, 'BASE_CONFIG_UPDATED_AT', ''),
     last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
     last_backup_at: getMetaValue(db, 'LAST_SUCCESSFUL_BACKUP', ''),
     sync_versions: getSyncVersions(db),
   };
 }
 
+function validateSettingUpdateEntry(key: keyof AppSettingsMap, rawVal: string): string {
+  const val = rawVal.trim();
+  if (key === 'app_name' || key === 'school_name' || key === 'org_name') {
+    if (!val) {
+      throw new Error(`Pengaturan "${key}" tidak boleh kosong.`);
+    }
+    return val.slice(0, 160);
+  }
+  if (key === 'primary_color' || key === 'accent_color') {
+    if (!/^#[0-9a-fA-F]{3,8}$/.test(val)) {
+      throw new Error(`Kode warna "${key}" harus menggunakan format hex yang valid (mis. #0F294A).`);
+    }
+    return val;
+  }
+  if (key === 'max_login_attempts') {
+    const n = Number(val);
+    if (!Number.isFinite(n) || n < 3 || n > 15) {
+      throw new Error('Maksimal percobaan login harus bernilai antara 3 hingga 15.');
+    }
+    return String(Math.round(n));
+  }
+  if (key === 'lockout_minutes') {
+    const n = Number(val);
+    if (!Number.isFinite(n) || n < 1 || n > 60) {
+      throw new Error('Durasi blokir login harus antara 1 hingga 60 menit.');
+    }
+    return String(Math.round(n));
+  }
+  if (key === 'session_hours') {
+    const n = Number(val);
+    if (!Number.isFinite(n) || n < 1 || n > 24) {
+      throw new Error('Masa aktif sesi harus antara 1 hingga 24 jam.');
+    }
+    return String(Math.round(n));
+  }
+  if (key === 'professor_global_access') {
+    return val === 'true' ? 'true' : 'false';
+  }
+  return rawVal;
+}
+
 export function updateSettingsWithVersioning(
   db: DatabaseSync,
   updates: Partial<Record<keyof AppSettingsMap, unknown>>,
   actorUserId: string,
-  options: { expectedVersion?: number; note?: string; status?: 'APPLIED' | 'ROLLED_BACK' } = {},
+  options: {
+    expectedVersion?: number;
+    note?: string;
+    status?: 'APPLIED' | 'ROLLED_BACK';
+    source?: BaseConfigSource;
+  } = {},
 ): {
   settings: AppSettingsMap;
   config_version: number;
+  base_config_source: BaseConfigSource;
   changed_keys: string[];
   verified: boolean;
 } {
@@ -746,7 +903,7 @@ export function updateSettingsWithVersioning(
     );
   }
 
-  const existing = getSettingsMap(db, { strict: true });
+  const existing = getBaseConfigurationMap(db, { strict: true });
   const changedEntries: Array<{
     key: keyof AppSettingsMap;
     oldValue: string;
@@ -756,7 +913,7 @@ export function updateSettingsWithVersioning(
 
   for (const key of ALLOWED_SETTING_KEYS) {
     if (updates[key] === undefined) continue;
-    const nextVal = String(updates[key]);
+    const nextVal = validateSettingUpdateEntry(key, String(updates[key]));
     const prevVal = String(existing[key] ?? '');
     if (nextVal !== prevVal) {
       changedEntries.push({
@@ -772,6 +929,7 @@ export function updateSettingsWithVersioning(
     return {
       settings: existing,
       config_version: currentVersion,
+      base_config_source: getMetaValue(db, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT') as BaseConfigSource,
       changed_keys: [],
       verified: true,
     };
@@ -779,10 +937,22 @@ export function updateSettingsWithVersioning(
 
   const nextVersion = currentVersion + 1;
   const ts = nowIso();
+  const nextSource: BaseConfigSource =
+    options.source || (options.status === 'ROLLED_BACK' ? 'ROLLBACK' : 'SUPER_ADMIN');
 
   db.exec('BEGIN IMMEDIATE;');
   try {
-    const upsert = db.prepare(
+    const upsertBase = db.prepare(
+      `INSERT INTO BASE_CONFIGURATION (config_key, config_value, source, config_version, updated_by, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(config_key) DO UPDATE SET
+         config_value = excluded.config_value,
+         source = excluded.source,
+         config_version = excluded.config_version,
+         updated_by = excluded.updated_by,
+         updated_at = excluded.updated_at`,
+    );
+    const upsertSetting = db.prepare(
       `INSERT INTO SETTINGS (setting_key, setting_value) VALUES (?, ?)
        ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value`,
     );
@@ -792,7 +962,8 @@ export function updateSettingsWithVersioning(
     );
 
     for (const entry of changedEntries) {
-      upsert.run(entry.key, entry.newValue);
+      upsertBase.run(entry.key, entry.newValue, nextSource, nextVersion, actorUserId, ts);
+      upsertSetting.run(entry.key, entry.newValue);
       insertVersion.run(
         uid('cfgv'),
         nextVersion,
@@ -808,15 +979,32 @@ export function updateSettingsWithVersioning(
     }
 
     setMetaValue(db, 'CONFIG_VERSION', String(nextVersion));
+    setMetaValue(db, 'BASE_CONFIG_SOURCE', nextSource);
+    setMetaValue(db, 'BASE_CONFIG_UPDATED_AT', ts);
+    setMetaValue(db, 'BASE_CONFIG_UPDATED_BY', actorUserId);
     bumpSyncVersion(db, 'config');
 
-    // Read-back verification inside transaction before commit
-    const verifyStmt = db.prepare('SELECT setting_value FROM SETTINGS WHERE setting_key = ?');
+    // Read-back verification inside transaction against BOTH BASE_CONFIGURATION & SETTINGS before commit
+    const verifyBaseStmt = db.prepare(
+      'SELECT config_value, config_version FROM BASE_CONFIGURATION WHERE config_key = ?',
+    );
+    const verifySettingStmt = db.prepare(
+      'SELECT setting_value FROM SETTINGS WHERE setting_key = ?',
+    );
     for (const entry of changedEntries) {
-      const row = verifyStmt.get(entry.key) as { setting_value: string } | undefined;
-      if (!row || row.setting_value !== entry.newValue) {
+      const baseRow = verifyBaseStmt.get(entry.key) as
+        | { config_value: string; config_version: number }
+        | undefined;
+      const settingRow = verifySettingStmt.get(entry.key) as { setting_value: string } | undefined;
+      if (
+        !baseRow ||
+        baseRow.config_value !== entry.newValue ||
+        baseRow.config_version !== nextVersion ||
+        !settingRow ||
+        settingRow.setting_value !== entry.newValue
+      ) {
         throw new DatabasePersistenceError(
-          `Verifikasi baca ulang gagal untuk pengaturan "${entry.key}".`,
+          `Verifikasi write-through Base Configuration gagal untuk "${entry.key}".`,
           'WRITE_VERIFICATION_FAILED',
         );
       }
@@ -829,20 +1017,22 @@ export function updateSettingsWithVersioning(
       level: 'ERROR',
       source: 'updateSettingsWithVersioning',
       event_type: 'SETTINGS_SAVE_FAILED',
-      message: err instanceof Error ? err.message : 'Gagal menyimpan pengaturan.',
+      message: err instanceof Error ? err.message : 'Gagal menyimpan pengaturan ke Base Configuration.',
       details: { keys: changedEntries.map((c) => c.key), actorUserId },
     });
     throw err;
   }
 
-  logAudit(db, actorUserId, 'SETTINGS_UPDATE', {
+  logAudit(db, actorUserId, 'BASE_CONFIG_WRITE_THROUGH', {
     version: nextVersion,
+    source: nextSource,
     keys: changedEntries.map((c) => c.key),
   });
 
   return {
-    settings: getSettingsMap(db, { strict: true }),
+    settings: getBaseConfigurationMap(db, { strict: true }),
     config_version: nextVersion,
+    base_config_source: nextSource,
     changed_keys: changedEntries.map((c) => c.key),
     verified: true,
   };
@@ -864,13 +1054,14 @@ export function rollbackConfigVersion(
     throw new Error('Kunci konfigurasi pada riwayat ini tidak valid.');
   }
 
-  // Restore to target's old_value (undo that specific change)
+  // Restore ONLY the selected configuration key to target's old_value
   const result = updateSettingsWithVersioning(
     db,
     { [key]: target.old_value },
     actorUserId,
     {
       status: 'ROLLED_BACK',
+      source: 'ROLLBACK',
       note: `Rollback perubahan #${target.version_number} (${target.setting_key})`,
     },
   );
@@ -941,10 +1132,21 @@ export function saveUploadedLogoFile(
     throw new DatabasePersistenceError('Verifikasi ukuran file logo pada disk gagal.', 'UPLOAD_VERIFY_FAILED');
   }
 
+  const contentBase64 = writtenBytes.toString('base64');
   db.prepare(
-    `INSERT INTO APP_ASSETS (asset_id, asset_type, filename, mime_type, size_bytes, sha256, file_path, created_by, created_at)
-     VALUES (?, 'LOGO', ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(assetId, filename, params.mimeType, stat.size, sha256, fullPath, params.uploadedBy, nowIso());
+    `INSERT INTO APP_ASSETS (asset_id, asset_type, filename, mime_type, size_bytes, sha256, file_path, content_base64, created_by, created_at)
+     VALUES (?, 'LOGO', ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    assetId,
+    filename,
+    params.mimeType,
+    stat.size,
+    sha256,
+    fullPath,
+    contentBase64,
+    params.uploadedBy,
+    nowIso(),
+  );
 
   logAudit(db, params.uploadedBy, 'LOGO_FILE_UPLOAD', {
     asset_id: assetId,
@@ -959,6 +1161,57 @@ export function saveUploadedLogoFile(
     size_bytes: stat.size,
     sha256,
   };
+}
+
+export function resolveUploadedAssetFile(
+  db: DatabaseSync,
+  safeName: string,
+  uploadsDir: string = getDefaultDbPaths().uploadsDir,
+): { buffer: Buffer; mimeType: string } | null {
+  const cleanName = path.basename(safeName);
+  if (!cleanName) return null;
+  const fullPath = path.resolve(uploadsDir, cleanName);
+  if (!fullPath.startsWith(path.resolve(uploadsDir) + path.sep)) {
+    return null;
+  }
+
+  const ext = path.extname(cleanName).toLowerCase();
+  const mimeMap: Record<string, string> = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.webp': 'image/webp',
+    '.gif': 'image/gif',
+  };
+  const fallbackMime = mimeMap[ext] || 'application/octet-stream';
+
+  if (fs.existsSync(fullPath)) {
+    return { buffer: fs.readFileSync(fullPath), mimeType: fallbackMime };
+  }
+
+  // Self-heal from embedded APP_ASSETS.content_base64 in SQLite database if disk uploads directory was replaced
+  const row = db
+    .prepare('SELECT mime_type, sha256, content_base64 FROM APP_ASSETS WHERE filename = ?')
+    .get(cleanName) as { mime_type: string; sha256: string; content_base64: string } | undefined;
+  if (!row || !row.content_base64) {
+    return null;
+  }
+
+  const buf = Buffer.from(row.content_base64, 'base64');
+  if (buf.length === 0) return null;
+  if (row.sha256) {
+    const actualSha = crypto.createHash('sha256').update(buf).digest('hex');
+    if (actualSha !== row.sha256) return null;
+  }
+
+  try {
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    fs.writeFileSync(fullPath, buf);
+  } catch {
+    // Still serve in-memory buffer even if upload dir is temporarily unwritable
+  }
+
+  return { buffer: buf, mimeType: row.mime_type || fallbackMime };
 }
 
 export function logAudit(db: DatabaseSync, userId: string, activity: string, details: Record<string, unknown> | string) {
@@ -987,6 +1240,17 @@ export function createNotification(db: DatabaseSync, userId: string, title: stri
 }
 
 function seedInitialData(db: DatabaseSync) {
+  const ts = nowIso();
+  const baseCount = (db.prepare('SELECT COUNT(*) as c FROM BASE_CONFIGURATION').get() as { c: number }).c;
+  if (baseCount === 0) {
+    const insertBase = db.prepare(
+      "INSERT OR IGNORE INTO BASE_CONFIGURATION (config_key, config_value, source, config_version, updated_by, updated_at) VALUES (?, ?, 'INITIAL_DEFAULT', 1, 'system_init', ?)",
+    );
+    for (const [k, v] of Object.entries(DEFAULT_APP_SETTINGS)) {
+      insertBase.run(k, v, ts);
+    }
+  }
+
   const settingsCount = (db.prepare('SELECT COUNT(*) as c FROM SETTINGS').get() as { c: number }).c;
   if (settingsCount === 0) {
     const insertSetting = db.prepare(
@@ -1502,6 +1766,7 @@ export const BACKUP_TABLES = [
   'ANSWERS',
   'VIOLATION_LOGS',
   'RESULTS',
+  'BASE_CONFIGURATION',
   'SETTINGS',
   'AUDIT_LOGS',
   'EXAM_LOGS',
@@ -1686,8 +1951,26 @@ export function restoreBackupSnapshot(
       }
     }
 
+    // Ensure BASE_CONFIGURATION exists even if restoring a pre-v3 snapshot that only has SETTINGS
+    const baseCfgCount = (db.prepare('SELECT COUNT(*) as c FROM BASE_CONFIGURATION').get() as { c: number }).c;
+    if (baseCfgCount === 0) {
+      const sRows = db
+        .prepare('SELECT setting_key, setting_value FROM SETTINGS')
+        .all() as Array<{ setting_key: string; setting_value: string }>;
+      const insBase = db.prepare(
+        "INSERT OR IGNORE INTO BASE_CONFIGURATION (config_key, config_value, source, config_version, updated_by, updated_at) VALUES (?, ?, 'RESTORE', ?, ?, ?)",
+      );
+      const rTs = nowIso();
+      for (const s of sRows) {
+        insBase.run(s.setting_key, s.setting_value, 1, restoredBy, rTs);
+      }
+    }
+
     // Ensure metadata markers stay valid and never reset INSTALLATION_ID unintentionally
     setMetaValue(db, 'DATABASE_INITIALIZED', 'true');
+    setMetaValue(db, 'BASE_CONFIG_SOURCE', 'RESTORE');
+    setMetaValue(db, 'BASE_CONFIG_UPDATED_AT', nowIso());
+    setMetaValue(db, 'BASE_CONFIG_UPDATED_BY', restoredBy);
     if (Array.isArray(snapshot.SYSTEM_METADATA)) {
       const metaCfg = snapshot.SYSTEM_METADATA.find((r) => r.meta_key === 'CONFIG_VERSION');
       if (metaCfg?.meta_value) {
@@ -1723,9 +2006,10 @@ export function restoreBackupSnapshot(
 
     // Verify restored data before commit
     const restoredUsersCount = (db.prepare('SELECT COUNT(*) as c FROM USERS').get() as { c: number }).c;
+    const restoredBaseCount = (db.prepare('SELECT COUNT(*) as c FROM BASE_CONFIGURATION').get() as { c: number }).c;
     const restoredSettingsCount = (db.prepare('SELECT COUNT(*) as c FROM SETTINGS').get() as { c: number }).c;
-    if (restoredUsersCount === 0 || restoredSettingsCount === 0) {
-      throw new DatabasePersistenceError('Verifikasi pemulihan gagal: USERS/SETTINGS kosong.', 'RESTORE_VERIFY_FAILED');
+    if (restoredUsersCount === 0 || restoredBaseCount === 0 || restoredSettingsCount === 0) {
+      throw new DatabasePersistenceError('Verifikasi pemulihan gagal: USERS/BASE_CONFIGURATION kosong.', 'RESTORE_VERIFY_FAILED');
     }
 
     db.exec('COMMIT;');
@@ -1778,6 +2062,7 @@ export function executeFactoryReset(
     'OFFICIAL_DOCUMENTS',
     'REPORT_TEMPLATES',
     'CONFIG_VERSIONS',
+    'BASE_CONFIGURATION',
     'SETTINGS',
     'SESSIONS',
     'LOGIN_ATTEMPTS',
@@ -1793,6 +2078,9 @@ export function executeFactoryReset(
     ensureDefaultReportTemplates(db, true, params.actorUserId);
     setMetaValue(db, 'DATABASE_INITIALIZED', 'true');
     setMetaValue(db, 'CONFIG_VERSION', '1');
+    setMetaValue(db, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT');
+    setMetaValue(db, 'BASE_CONFIG_UPDATED_AT', nowIso());
+    setMetaValue(db, 'BASE_CONFIG_UPDATED_BY', params.actorUserId);
     for (const domain of Object.keys(SYNC_META_KEY_MAP) as SyncDomain[]) {
       bumpSyncVersion(db, domain);
     }
@@ -1860,6 +2148,7 @@ export function getSystemMonitoringStatus(
     RESULTS: countTable('RESULTS'),
     REPORT_TEMPLATES: countTable('REPORT_TEMPLATES'),
     OFFICIAL_DOCUMENTS: countTable('OFFICIAL_DOCUMENTS'),
+    BASE_CONFIGURATION: countTable('BASE_CONFIGURATION'),
     CONFIG_VERSIONS: countTable('CONFIG_VERSIONS'),
     APP_ASSETS: countTable('APP_ASSETS'),
     BACKUP_LOGS: countTable('BACKUP_LOGS'),
@@ -1880,6 +2169,9 @@ export function getSystemMonitoringStatus(
     last_migration_version: getMetaValue(db, 'LAST_MIGRATION_VERSION', ''),
     database_initialized: getMetaValue(db, 'DATABASE_INITIALIZED', '') === 'true',
     config_version: getConfigVersion(db),
+    base_config_source: (getMetaValue(db, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT') as BaseConfigSource),
+    base_config_updated_at: getMetaValue(db, 'BASE_CONFIG_UPDATED_AT', ''),
+    base_config_updated_by: getMetaValue(db, 'BASE_CONFIG_UPDATED_BY', ''),
     last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
     last_backup_at: getMetaValue(db, 'LAST_SUCCESSFUL_BACKUP', ''),
     last_sync_check_at: getMetaValue(db, 'LAST_SYNC_CHECK_AT', ''),

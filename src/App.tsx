@@ -90,21 +90,23 @@ export default function App() {
       const cfg = await apiFetch<
         Partial<AppSettingsMap> & { config_version?: number }
       >('/public/config');
+      if (!cfg || !cfg.app_name) {
+        throw new Error('Respons konfigurasi server kosong atau tidak valid.');
+      }
       setConfig(cfg);
       setConfigError(null);
       if (typeof cfg.config_version === 'number') {
         configVersionRef.current = cfg.config_version;
       }
-      if (cfg.app_name) {
-        document.title = cfg.app_name;
-      }
+      document.title = cfg.app_name;
     } catch (err) {
-      // Never overwrite existing loaded config or silently fallback to defaults
-      setConfigError(
+      // Never overwrite existing loaded config or silently fallback to factory defaults
+      const msg =
         err instanceof Error
           ? err.message
-          : 'Konfigurasi server tidak dapat dibaca dari database.',
-      );
+          : 'Konfigurasi server tidak dapat dibaca dari database.';
+      setConfigError(msg);
+      setConnectionError(msg);
     }
   }, []);
 

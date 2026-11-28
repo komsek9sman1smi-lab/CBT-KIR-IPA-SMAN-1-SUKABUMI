@@ -18,6 +18,7 @@ import {
   createNotification,
   ensureDefaultReportTemplates,
   executeFactoryReset,
+  getBaseConfigurationMap,
   getConfigVersion,
   getDb,
   getDefaultDbPaths,
@@ -30,6 +31,7 @@ import {
   logExamEvent,
   nowIso,
   recordServerEvent,
+  resolveUploadedAssetFile,
   restoreBackupSnapshot,
   rollbackConfigVersion,
   saveUploadedLogoFile,
@@ -381,23 +383,15 @@ export function createApiRouter() {
       res.status(404).end();
       return;
     }
-    const uploadsDir = getDefaultDbPaths().uploadsDir;
-    const fullPath = path.resolve(uploadsDir, safeName);
-    if (!fullPath.startsWith(path.resolve(uploadsDir) + path.sep) || !fs.existsSync(fullPath)) {
+    const db = getDb();
+    const asset = resolveUploadedAssetFile(db, safeName);
+    if (!asset) {
       res.status(404).json({ error: 'Berkas aset tidak ditemukan di server.' });
       return;
     }
-    const ext = path.extname(safeName).toLowerCase();
-    const mimeMap: Record<string, string> = {
-      '.png': 'image/png',
-      '.jpg': 'image/jpeg',
-      '.jpeg': 'image/jpeg',
-      '.webp': 'image/webp',
-      '.gif': 'image/gif',
-    };
-    res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream');
+    res.setHeader('Content-Type', asset.mimeType);
     res.setHeader('Cache-Control', 'public, max-age=86400');
-    res.sendFile(fullPath);
+    res.send(asset.buffer);
   });
 
   router.get('/sync/version', (req, res) => {
@@ -412,6 +406,8 @@ export function createApiRouter() {
         app_version: state.app_version,
         db_version: state.db_version,
         config_version: state.config_version,
+        base_config_source: state.base_config_source,
+        base_config_updated_at: state.base_config_updated_at,
         last_save_at: state.last_save_at,
         sync_versions: {
           config: state.sync_versions.config,
@@ -424,7 +420,7 @@ export function createApiRouter() {
 
   router.get('/public/config', (_req, res) => {
     const db = getDb();
-    const settings = getSettingsMap(db, { strict: true });
+    const settings = getBaseConfigurationMap(db, { strict: true });
     res.setHeader('Cache-Control', 'no-store');
     res.json({
       app_name: settings.app_name,
@@ -439,6 +435,8 @@ export function createApiRouter() {
       announcement: settings.announcement,
       report_footer: settings.report_footer,
       config_version: getConfigVersion(db),
+      base_config_source: getMetaValue(db, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT'),
+      base_config_updated_at: getMetaValue(db, 'BASE_CONFIG_UPDATED_AT', ''),
       installation_id: getMetaValue(db, 'INSTALLATION_ID', ''),
       last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
     });
@@ -1580,6 +1578,16 @@ export function createApiRouter() {
 
     db.exec('BEGIN TRANSACTION;');
     try {
+      const mergedSettingsJson =
+        typeof b.settings_json === 'string'
+          ? b.settings_json
+          : b.settings && typeof b.settings === 'object'
+            ? JSON.stringify({
+                ...safeJsonParse<Record<string, unknown>>(existing.settings_json, {}),
+                ...(b.settings as Record<string, unknown>),
+              })
+            : existing.settings_json;
+
       db.prepare(
         `UPDATE EXAMS
          SET title = ?, description = ?, subject = ?, start_time = ?, end_time = ?, duration = ?,
@@ -1594,11 +1602,7 @@ export function createApiRouter() {
         Math.max(1, Number(b.duration ?? existing.duration)),
         String(b.status ?? existing.status),
         selectedQuestions ? selectedQuestions.length : existing.total_questions,
-        typeof b.settings_json === 'string'
-          ? b.settings_json
-          : b.settings
-            ? JSON.stringify(b.settings)
-            : existing.settings_json,
+        mergedSettingsJson,
         existing.exam_id,
       );
 
@@ -3466,6 +3470,7 @@ export function createApiRouter() {
       logo_url: saved.logo_url,
       asset: saved,
       config_version: configVersion,
+      base_config_source: getMetaValue(db, 'BASE_CONFIG_SOURCE', 'SUPER_ADMIN'),
       verified: true,
     });
   });
@@ -3518,14 +3523,27 @@ export function createApiRouter() {
     }
 
     restoreBackupSnapshot(db, snapshot, req.authUser!.user_id);
+
+    // Re-materialize restored assets on disk immediately so uploaded logos remain ready
+    const restoredAssets = db
+      .prepare('SELECT filename FROM APP_ASSETS')
+      .all() as Array<{ filename: string }>;
+    for (const a of restoredAssets) {
+      if (a.filename) {
+        resolveUploadedAssetFile(db, a.filename);
+      }
+    }
+
     res.json({ ok: true, config_version: getConfigVersion(db) });
   });
 
   router.get('/settings', requireAuth, requireRole('SUPER_ADMIN'), (_req, res) => {
     const db = getDb();
     res.json({
-      settings: getSettingsMap(db, { strict: true }),
+      settings: getBaseConfigurationMap(db, { strict: true }),
       config_version: getConfigVersion(db),
+      base_config_source: getMetaValue(db, 'BASE_CONFIG_SOURCE', 'INITIAL_DEFAULT'),
+      base_config_updated_at: getMetaValue(db, 'BASE_CONFIG_UPDATED_AT', ''),
       last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
     });
   });
@@ -3540,12 +3558,14 @@ export function createApiRouter() {
     const result = updateSettingsWithVersioning(db, updates, req.authUser!.user_id, {
       expectedVersion,
       note,
+      source: 'SUPER_ADMIN',
     });
     res.json({
       ok: true,
       verified: result.verified,
       changed_keys: result.changed_keys,
       config_version: result.config_version,
+      base_config_source: result.base_config_source,
       settings: result.settings,
     });
   });

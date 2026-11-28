@@ -1,12 +1,14 @@
-import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
+  Clock,
   Database,
   DatabaseBackup,
   Download,
   History,
   ImagePlus,
+  Loader2,
   Lock,
   RefreshCw,
   RotateCcw,
@@ -23,6 +25,7 @@ import { formatAuditDetails } from '../shared/grading';
 import type {
   AppSettingsMap,
   BackupLogRecord,
+  BaseConfigSource,
   ConfigVersionRecord,
   SystemMonitoringStatus,
 } from '../shared/types';
@@ -369,6 +372,29 @@ export function BackupRestoreView({
   );
 }
 
+type ConfigSaveState = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error';
+
+const APP_MODE_KEYS: Array<keyof AppSettingsMap> = [
+  'app_name',
+  'org_name',
+  'school_name',
+  'academic_year',
+  'management_period',
+  'logo_url',
+  'primary_color',
+  'accent_color',
+  'contact_info',
+  'announcement',
+  'report_footer',
+];
+
+const SECURITY_MODE_KEYS: Array<keyof AppSettingsMap> = [
+  'max_login_attempts',
+  'lockout_minutes',
+  'session_hours',
+  'professor_global_access',
+];
+
 export function SettingsView({
   mode,
   syncTick = 0,
@@ -379,73 +405,197 @@ export function SettingsView({
   onConfigUpdated: () => void;
 }) {
   const [settings, setSettings] = useState<AppSettingsMap | null>(null);
+  const [serverBaseline, setServerBaseline] = useState<AppSettingsMap | null>(null);
   const [configVersion, setConfigVersion] = useState<number>(1);
+  const [baseConfigSource, setBaseConfigSource] = useState<BaseConfigSource>('INITIAL_DEFAULT');
+  const [baseConfigUpdatedAt, setBaseConfigUpdatedAt] = useState<string>('');
   const [versions, setVersions] = useState<ConfigVersionRecord[]>([]);
-  const [saving, setSaving] = useState(false);
+  const [saveState, setSaveState] = useState<ConfigSaveState>('idle');
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [conflictDetected, setConflictDetected] = useState(false);
+  const [remoteUpdateAvailable, setRemoteUpdateAvailable] = useState(false);
+  const [autosaveEnabled, setAutosaveEnabled] = useState(true);
   const [toast, setToast] = useState('');
   const [error, setError] = useState('');
 
-  const loadSettingsAndHistory = async () => {
+  const savingInFlightRef = useRef(false);
+  const settingsRef = useRef<AppSettingsMap | null>(null);
+  const baselineRef = useRef<AppSettingsMap | null>(null);
+  const configVersionRef = useRef<number>(1);
+
+  settingsRef.current = settings;
+  baselineRef.current = serverBaseline;
+  configVersionRef.current = configVersion;
+
+  const activeModeKeys = mode === 'APP' ? APP_MODE_KEYS : SECURITY_MODE_KEYS;
+
+  const changedPatch = useMemo(() => {
+    const patch: Partial<AppSettingsMap> = {};
+    if (!settings || !serverBaseline) return patch;
+    for (const key of activeModeKeys) {
+      if (String(settings[key] ?? '') !== String(serverBaseline[key] ?? '')) {
+        patch[key] = settings[key];
+      }
+    }
+    return patch;
+  }, [activeModeKeys, serverBaseline, settings]);
+
+  const changedKeys = useMemo(
+    () => Object.keys(changedPatch) as Array<keyof AppSettingsMap>,
+    [changedPatch],
+  );
+  const isDirty = changedKeys.length > 0;
+
+  const loadSettingsAndHistory = useCallback(async (forceResetForm = false) => {
     try {
       const [cfgRes, verRes] = await Promise.all([
-        apiFetch<{ settings: AppSettingsMap; config_version: number }>('/settings'),
+        apiFetch<{
+          settings: AppSettingsMap;
+          config_version: number;
+          base_config_source?: BaseConfigSource;
+          base_config_updated_at?: string;
+        }>('/settings'),
         apiFetch<{ versions: ConfigVersionRecord[] }>('/settings/versions?limit=25'),
       ]);
-      setSettings(cfgRes.settings);
-      setConfigVersion(cfgRes.config_version);
+
+      const currentlyDirty =
+        !forceResetForm &&
+        settingsRef.current !== null &&
+        baselineRef.current !== null &&
+        activeModeKeys.some(
+          (k) => String(settingsRef.current?.[k] ?? '') !== String(baselineRef.current?.[k] ?? ''),
+        );
+
       setVersions(verRes.versions);
+
+      if (currentlyDirty) {
+        if (cfgRes.config_version !== configVersionRef.current) {
+          setRemoteUpdateAvailable(true);
+        }
+        return;
+      }
+
+      setSettings(cfgRes.settings);
+      setServerBaseline(cfgRes.settings);
+      setConfigVersion(cfgRes.config_version);
+      if (cfgRes.base_config_source) setBaseConfigSource(cfgRes.base_config_source);
+      if (cfgRes.base_config_updated_at !== undefined) {
+        setBaseConfigUpdatedAt(cfgRes.base_config_updated_at);
+      }
       setConflictDetected(false);
+      setRemoteUpdateAvailable(false);
       setError('');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat pengaturan dari server.');
     }
-  };
+  }, [activeModeKeys]);
 
   useEffect(() => {
-    void loadSettingsAndHistory();
-  }, [syncTick]);
+    void loadSettingsAndHistory(false);
+  }, [syncTick, loadSettingsAndHistory]);
+
+  const executePartialSave = useCallback(
+    async (trigger: 'manual' | 'autosave') => {
+      if (savingInFlightRef.current) return;
+      const currentSettings = settingsRef.current;
+      const currentBaseline = baselineRef.current;
+      if (!currentSettings || !currentBaseline) return;
+
+      const patch: Partial<AppSettingsMap> = {};
+      for (const key of activeModeKeys) {
+        if (String(currentSettings[key] ?? '') !== String(currentBaseline[key] ?? '')) {
+          patch[key] = currentSettings[key];
+        }
+      }
+      const patchKeys = Object.keys(patch) as Array<keyof AppSettingsMap>;
+      if (patchKeys.length === 0) {
+        if (trigger === 'manual') {
+          setSaveState('saved');
+          setToast(`Tidak ada perubahan baru (Base Config aktif Versi #${configVersionRef.current}).`);
+        }
+        return;
+      }
+
+      savingInFlightRef.current = true;
+      setSaveState('saving');
+      setError('');
+      setConflictDetected(false);
+
+      try {
+        const res = await apiFetch<{
+          ok: boolean;
+          verified: boolean;
+          config_version: number;
+          base_config_source?: BaseConfigSource;
+          settings: AppSettingsMap;
+          changed_keys: string[];
+        }>('/settings', {
+          method: 'PUT',
+          body: JSON.stringify({
+            settings: patch,
+            expected_version: configVersionRef.current,
+          }),
+        });
+
+        setServerBaseline(res.settings);
+        setSettings((prev) => {
+          if (!prev) return res.settings;
+          // Preserve any newer keystrokes made while the request was in flight
+          const merged: AppSettingsMap = { ...res.settings };
+          for (const key of activeModeKeys) {
+            if (String(prev[key] ?? '') !== String(currentSettings[key] ?? '')) {
+              merged[key] = prev[key];
+            }
+          }
+          return merged;
+        });
+        setConfigVersion(res.config_version);
+        if (res.base_config_source) setBaseConfigSource(res.base_config_source);
+        setBaseConfigUpdatedAt(new Date().toISOString());
+        setRemoteUpdateAvailable(false);
+        setSaveState('saved');
+        setToast(
+          res.changed_keys.length > 0
+            ? `${trigger === 'autosave' ? 'Autosave: ' : ''}Tersimpan ke Base Configuration & terverifikasi (Versi #${res.config_version}: ${res.changed_keys.join(', ')}).`
+            : `Tidak ada perubahan baru (Versi aktif #${res.config_version}).`,
+        );
+        const verRes = await apiFetch<{ versions: ConfigVersionRecord[] }>('/settings/versions?limit=25');
+        setVersions(verRes.versions);
+        onConfigUpdated();
+      } catch (err) {
+        setSaveState('error');
+        if (err instanceof ApiError && err.status === 409) {
+          setConflictDetected(true);
+        }
+        setError(err instanceof Error ? err.message : 'Gagal menyimpan pengaturan ke Base Configuration server.');
+      } finally {
+        savingInFlightRef.current = false;
+      }
+    },
+    [activeModeKeys, onConfigUpdated],
+  );
+
+  // Track dirty state cleanly
+  useEffect(() => {
+    if (savingInFlightRef.current) return;
+    if (isDirty) {
+      setSaveState('unsaved');
+      setToast('');
+    }
+  }, [isDirty]);
+
+  // Debounced autosave (1500ms) for edited fields
+  useEffect(() => {
+    if (!autosaveEnabled || !isDirty || uploadingLogo || conflictDetected) return;
+    const timer = setTimeout(() => {
+      void executePartialSave('autosave');
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [autosaveEnabled, isDirty, uploadingLogo, conflictDetected, changedPatch, executePartialSave]);
 
   const handleSave = async (e: FormEvent) => {
     e.preventDefault();
-    if (!settings) return;
-    setSaving(true);
-    setError('');
-    setToast('');
-    setConflictDetected(false);
-    try {
-      const res = await apiFetch<{
-        ok: boolean;
-        verified: boolean;
-        config_version: number;
-        settings: AppSettingsMap;
-        changed_keys: string[];
-      }>('/settings', {
-        method: 'PUT',
-        body: JSON.stringify({
-          settings,
-          expected_version: configVersion,
-        }),
-      });
-      setSettings(res.settings);
-      setConfigVersion(res.config_version);
-      setToast(
-        res.changed_keys.length > 0
-          ? `Tersimpan permanen dan terverifikasi di server (Versi #${res.config_version}).`
-          : `Tidak ada perubahan baru (Versi aktif #${res.config_version}).`,
-      );
-      setTimeout(() => setToast(''), 4000);
-      await loadSettingsAndHistory();
-      onConfigUpdated();
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 409) {
-        setConflictDetected(true);
-      }
-      setError(err instanceof Error ? err.message : 'Gagal menyimpan pengaturan ke server.');
-    } finally {
-      setSaving(false);
-    }
+    await executePartialSave('manual');
   };
 
   const handleLogoUpload = (e: ChangeEvent<HTMLInputElement>) => {
@@ -453,6 +603,7 @@ export function SettingsView({
     if (!file || !settings) return;
     setError('');
     setUploadingLogo(true);
+    setSaveState('saving');
     const reader = new FileReader();
     reader.onload = async () => {
       try {
@@ -463,6 +614,7 @@ export function SettingsView({
           ok: boolean;
           logo_url: string;
           config_version: number;
+          base_config_source?: BaseConfigSource;
           verified: boolean;
         }>('/uploads/logo', {
           method: 'POST',
@@ -470,16 +622,23 @@ export function SettingsView({
             data_url: reader.result,
             filename: file.name,
             apply_immediately: true,
-            expected_version: configVersion,
+            expected_version: configVersionRef.current,
           }),
         });
         setSettings((prev) => (prev ? { ...prev, logo_url: res.logo_url } : prev));
+        setServerBaseline((prev) => (prev ? { ...prev, logo_url: res.logo_url } : prev));
         setConfigVersion(res.config_version);
-        setToast(`Logo berhasil diunggah & disimpan permanen di server (Versi #${res.config_version}).`);
-        setTimeout(() => setToast(''), 4000);
-        await loadSettingsAndHistory();
+        if (res.base_config_source) setBaseConfigSource(res.base_config_source);
+        setBaseConfigUpdatedAt(new Date().toISOString());
+        setSaveState('saved');
+        setToast(
+          `Logo berhasil diunggah ke SQLite & disk server lalu dijadikan Base Configuration permanen (Versi #${res.config_version}).`,
+        );
+        const verRes = await apiFetch<{ versions: ConfigVersionRecord[] }>('/settings/versions?limit=25');
+        setVersions(verRes.versions);
         onConfigUpdated();
       } catch (err) {
+        setSaveState('error');
         if (err instanceof ApiError && err.status === 409) {
           setConflictDetected(true);
         }
@@ -491,6 +650,7 @@ export function SettingsView({
     };
     reader.onerror = () => {
       setUploadingLogo(false);
+      setSaveState('error');
       setError('Gagal membaca berkas gambar logo.');
     };
     reader.readAsDataURL(file);
@@ -498,18 +658,24 @@ export function SettingsView({
 
   const handleRollback = async (versionId: string) => {
     setError('');
+    setSaveState('saving');
     try {
       const res = await apiFetch<{
         ok: boolean;
         config_version: number;
+        base_config_source?: BaseConfigSource;
         settings: AppSettingsMap;
       }>(`/settings/rollback/${encodeURIComponent(versionId)}`, { method: 'POST' });
       setSettings(res.settings);
+      setServerBaseline(res.settings);
       setConfigVersion(res.config_version);
-      setToast(`Rollback konfigurasi berhasil diterapkan (Versi baru #${res.config_version}).`);
-      await loadSettingsAndHistory();
+      setBaseConfigSource(res.base_config_source || 'ROLLBACK');
+      setSaveState('saved');
+      setToast(`Rollback konfigurasi berhasil diterapkan ke Base Configuration (Versi baru #${res.config_version}).`);
+      await loadSettingsAndHistory(true);
       onConfigUpdated();
     } catch (err) {
+      setSaveState('error');
       setError(err instanceof Error ? err.message : 'Gagal melakukan rollback konfigurasi.');
     }
   };
@@ -517,7 +683,7 @@ export function SettingsView({
   if (!settings && !error) {
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-6 text-sm text-slate-500">
-        Memuat pengaturan dari database server...
+        Memuat Base Configuration dari database server...
       </div>
     );
   }
@@ -525,17 +691,75 @@ export function SettingsView({
   return (
     <div className="space-y-6 max-w-4xl">
       <form onSubmit={handleSave} className="bg-white border border-slate-200 rounded-xl p-6 space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-200">
-          <div className="flex items-center gap-2">
-            {mode === 'SECURITY' && <ShieldCheck className="w-5 h-5 text-[#0F294A]" />}
-            <h2 className="text-lg font-bold text-[#0F294A]">
-              {mode === 'APP' ? 'Pengaturan Identitas Aplikasi' : 'Pengaturan Keamanan & Hak Akses'}
-            </h2>
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
+          <div>
+            <div className="flex items-center gap-2">
+              {mode === 'SECURITY' && <ShieldCheck className="w-5 h-5 text-[#0F294A]" />}
+              <h2 className="text-lg font-bold text-[#0F294A]">
+                {mode === 'APP' ? 'Pengaturan Identitas Aplikasi (Base Config)' : 'Pengaturan Keamanan & Hak Akses'}
+              </h2>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Sumber Base Config: <span className="font-mono font-semibold text-slate-700">{baseConfigSource}</span>
+              {baseConfigUpdatedAt ? ` · Diperbarui ${new Date(baseConfigUpdatedAt).toLocaleString('id-ID')}` : ''}
+            </p>
           </div>
-          <span className="px-2.5 py-1 rounded bg-slate-100 border border-slate-200 font-mono text-xs text-slate-700">
-            Versi Konfigurasi Server: #{configVersion}
-          </span>
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              data-testid="config-save-status"
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded text-xs font-semibold border ${
+                saveState === 'saving'
+                  ? 'bg-blue-50 border-blue-200 text-blue-800'
+                  : saveState === 'unsaved'
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
+                    : saveState === 'saved'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : saveState === 'error'
+                        ? 'bg-red-50 border-red-200 text-red-700'
+                        : 'bg-slate-100 border-slate-200 text-slate-700'
+              }`}
+            >
+              {saveState === 'saving' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              {saveState === 'unsaved' && <Clock className="w-3.5 h-3.5" />}
+              {saveState === 'saved' && <CheckCircle2 className="w-3.5 h-3.5" />}
+              {saveState === 'error' && <AlertTriangle className="w-3.5 h-3.5" />}
+              <span>
+                {saveState === 'saving'
+                  ? 'Sedang menyimpan...'
+                  : saveState === 'unsaved'
+                    ? `Belum disimpan (${changedKeys.length})`
+                    : saveState === 'saved'
+                      ? `Berhasil disimpan · #${configVersion}`
+                      : saveState === 'error'
+                        ? 'Gagal menyimpan'
+                        : `Tersinkron · #${configVersion}`}
+              </span>
+            </span>
+            <label className="inline-flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none px-2 py-1 rounded border border-slate-200 bg-slate-50">
+              <input
+                type="checkbox"
+                checked={autosaveEnabled}
+                onChange={(e) => setAutosaveEnabled(e.target.checked)}
+              />
+              Autosave
+            </label>
+          </div>
         </div>
+
+        {remoteUpdateAvailable && (
+          <div className="p-3 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-900 flex flex-wrap items-center justify-between gap-2">
+            <span>
+              <strong>Pembaruan Server Terdeteksi:</strong> Perangkat lain memperbarui Base Configuration. Perubahan ketikan lokal Anda tetap dipertahankan.
+            </span>
+            <button
+              type="button"
+              onClick={() => void loadSettingsAndHistory(true)}
+              className="px-3 py-1 rounded bg-blue-700 text-white font-semibold cursor-pointer"
+            >
+              Muat Versi Terbaru Server
+            </button>
+          </div>
+        )}
 
         {toast && (
           <div className="p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-sm text-emerald-800 flex items-center gap-2">
@@ -552,7 +776,7 @@ export function SettingsView({
             {conflictDetected && (
               <button
                 type="button"
-                onClick={() => void loadSettingsAndHistory()}
+                onClick={() => void loadSettingsAndHistory(true)}
                 className="inline-flex items-center gap-1.5 px-3 py-1 rounded bg-red-700 text-white text-xs font-semibold cursor-pointer"
               >
                 <RefreshCw className="w-3.5 h-3.5" />
@@ -721,15 +945,22 @@ export function SettingsView({
         ))}
 
         {settings && (
-          <div className="pt-2">
+          <div className="pt-2 flex flex-wrap items-center gap-3">
             <button
               type="submit"
-              disabled={saving}
+              disabled={saveState === 'saving'}
               className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg bg-[#0F294A] hover:bg-blue-800 disabled:opacity-60 text-white text-sm font-semibold cursor-pointer"
             >
               <Save className="w-4 h-4" />
-              {saving ? 'Menyimpan ke Server...' : 'Simpan Pengaturan Permanen'}
+              {saveState === 'saving'
+                ? 'Menyimpan ke Base Configuration...'
+                : isDirty
+                  ? `Simpan ${changedKeys.length} Perubahan Permanen`
+                  : 'Simpan Pengaturan Permanen'}
             </button>
+            <span className="text-xs text-slate-500">
+              Hanya bagian yang diubah yang dikirim dan diperbarui di Base Configuration server (partial update).
+            </span>
           </div>
         )}
       </form>
@@ -947,12 +1178,12 @@ export function ServerMonitoringView({
             </div>
 
             <div className="bg-white border border-slate-200 rounded-xl p-4">
-              <div className="text-xs text-slate-500">Versi Aplikasi & Skema DB</div>
+              <div className="text-xs text-slate-500">Versi & Base Configuration</div>
               <div className="mt-1 font-bold text-sm font-mono text-[#0F294A]">
                 v{status.app_version} / DB v{status.db_version}
               </div>
               <div className="text-[11px] text-slate-500 mt-1">
-                Versi Konfigurasi: #{status.config_version} · Paket GAS: {status.gas_bundle_status.files_count} berkas siap
+                Base Config: #{status.config_version} ({status.base_config_source || 'INITIAL_DEFAULT'})
               </div>
             </div>
 

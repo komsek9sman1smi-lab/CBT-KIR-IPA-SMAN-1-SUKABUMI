@@ -47,39 +47,49 @@ export function LoginView({
     }
   };
 
+  const hasLoadedConfig = Boolean(config.app_name);
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-10 px-4 sm:px-6">
       <div className="max-w-md w-full mx-auto bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 shadow-sm space-y-6">
         <div className="text-center space-y-3">
-          <AppLogo src={config.logo_url} sizeClass="w-16 h-16 mx-auto" />
+          <AppLogo src={config.logo_url} alt={config.app_name || 'Logo Aplikasi'} sizeClass="w-16 h-16 mx-auto" />
           <div>
-            <p className="text-xs font-semibold text-amber-700 tracking-wide">
-              {config.org_name || 'Kelompok Ilmiah Remaja (KIR) IPA'}
-            </p>
+            {config.org_name && (
+              <p className="text-xs font-semibold text-amber-700 tracking-wide">
+                {config.org_name}
+              </p>
+            )}
             <h1 className="text-xl font-bold text-[#0F294A] tracking-tight mt-0.5">
-              {config.app_name || 'CBT KIR IPA SMAN 1 SUKABUMI'}
+              {hasLoadedConfig
+                ? config.app_name
+                : configError
+                  ? 'Konfigurasi Server Tidak Tersedia'
+                  : 'Memuat Konfigurasi Server...'}
             </h1>
-            <p className="text-xs text-slate-500 mt-0.5">
-              {config.school_name || 'SMA Negeri 1 Sukabumi'}
-            </p>
+            {config.school_name && (
+              <p className="text-xs text-slate-500 mt-0.5">
+                {config.school_name}
+              </p>
+            )}
           </div>
         </div>
 
         {configError && (
           <div
             role="alert"
-            className="p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 flex items-center justify-between gap-2"
+            className="p-3 rounded-lg bg-red-50 border border-red-300 text-xs text-red-900 flex items-center justify-between gap-2"
           >
             <span>
-              <strong>Konfigurasi Server Gagal Dimuat:</strong> {configError}
+              <strong>Koneksi / Database Bermasalah:</strong> {configError}. Sistem memblokir fallback ke pengaturan awal demi keamanan data.
             </span>
             {onRetryConfig && (
               <button
                 type="button"
                 onClick={onRetryConfig}
-                className="px-2.5 py-1 rounded bg-amber-800 text-white font-semibold shrink-0 cursor-pointer"
+                className="px-2.5 py-1 rounded bg-red-700 hover:bg-red-800 text-white font-semibold shrink-0 cursor-pointer"
               >
-                Coba Lagi
+                Coba Muat Ulang
               </button>
             )}
           </div>

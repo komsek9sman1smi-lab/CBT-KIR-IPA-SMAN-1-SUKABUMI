@@ -10,6 +10,7 @@ import {
   FACTORY_RESET_CONFIRMATION_PHRASE,
   createBackupSnapshot,
   executeFactoryReset,
+  getBaseConfigurationMap,
   getConfigVersion,
   getConfigVersionHistory,
   getMetaValue,
@@ -17,6 +18,7 @@ import {
   getSyncVersions,
   listBackupsWithVerification,
   openAndInitializeDatabase,
+  resolveUploadedAssetFile,
   restoreBackupSnapshot,
   rollbackConfigVersion,
   saveUploadedLogoFile,
@@ -155,16 +157,17 @@ test('2. Upgrading pre-hardening DB preserves existing settings/users and create
   upgradedDb.close();
 });
 
-test('3. Empty USERS/SETTINGS after DATABASE_INITIALIZED=true throws loud error and blocks silent factory reset', (t) => {
+test('3. Empty USERS/BASE_CONFIGURATION after DATABASE_INITIALIZED=true throws loud error and blocks silent factory reset', (t) => {
   const { root, paths } = createTempPaths();
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 
   const db1 = openAndInitializeDatabase(paths);
-  // Corrupt / clear SETTINGS while keeping DATABASE_INITIALIZED='true'
+  // Corrupt / clear BASE_CONFIGURATION & SETTINGS while keeping DATABASE_INITIALIZED='true'
+  db1.prepare('DELETE FROM BASE_CONFIGURATION').run();
   db1.prepare('DELETE FROM SETTINGS').run();
 
   assert.throws(
-    () => getSettingsMap(db1, { strict: true }),
+    () => getBaseConfigurationMap(db1, { strict: true }),
     (err: unknown) => err instanceof DatabasePersistenceError && err.code === 'SETTINGS_EMPTY_AFTER_INIT',
   );
   db1.close();
@@ -296,3 +299,99 @@ test('6. Guarded Factory Reset rejects wrong phrase and creates AUTO_PRE_RESET b
   assert.ok(backups.some((b) => b.backup_type === 'AUTO_PRE_RESET' && b.file_exists));
   db.close();
 });
+
+test('7. Permanent Base Configuration write-through updates ONLY changed keys and updates BASE_CONFIG_SOURCE', (t) => {
+  const { root, paths } = createTempPaths();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const db = openAndInitializeDatabase(paths);
+  assert.equal(getMetaValue(db, 'BASE_CONFIG_SOURCE'), 'INITIAL_DEFAULT');
+
+  // Set custom school & security setting
+  const step1 = updateSettingsWithVersioning(
+    db,
+    { app_name: 'PORTAL KIR IPA UTAMA', lockout_minutes: '12' },
+    'usr_admin_01',
+    { expectedVersion: 1, source: 'SUPER_ADMIN' },
+  );
+  assert.equal(step1.base_config_source, 'SUPER_ADMIN');
+  assert.deepEqual(step1.changed_keys.sort(), ['app_name', 'lockout_minutes']);
+
+  // Partial update: change ONLY logo_url -> app_name and lockout_minutes must stay intact
+  const step2 = updateSettingsWithVersioning(
+    db,
+    { logo_url: '/api/assets/logo_permanen.png' },
+    'usr_admin_01',
+    { expectedVersion: 2, source: 'SUPER_ADMIN' },
+  );
+  assert.deepEqual(step2.changed_keys, ['logo_url']);
+  assert.equal(step2.settings.app_name, 'PORTAL KIR IPA UTAMA');
+  assert.equal(step2.settings.lockout_minutes, '12');
+
+  const rowApp = db
+    .prepare("SELECT config_value, source, config_version FROM BASE_CONFIGURATION WHERE config_key = 'app_name'")
+    .get() as { config_value: string; source: string; config_version: number };
+  const rowLogo = db
+    .prepare("SELECT config_value, source, config_version FROM BASE_CONFIGURATION WHERE config_key = 'logo_url'")
+    .get() as { config_value: string; source: string; config_version: number };
+  assert.equal(rowApp.config_value, 'PORTAL KIR IPA UTAMA');
+  assert.equal(rowApp.config_version, 2);
+  assert.equal(rowLogo.config_value, '/api/assets/logo_permanen.png');
+  assert.equal(rowLogo.config_version, 3);
+  assert.equal(rowLogo.source, 'SUPER_ADMIN');
+  db.close();
+});
+
+test('8. Uploaded logo self-heals from embedded SQLite APP_ASSETS.content_base64 when disk file is removed', (t) => {
+  const { root, paths } = createTempPaths();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const db = openAndInitializeDatabase(paths);
+  const fakePng = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4, 5]);
+  const uploaded = saveUploadedLogoFile(db, {
+    buffer: fakePng,
+    originalName: 'permanent-logo.png',
+    mimeType: 'image/png',
+    ext: 'png',
+    uploadedBy: 'usr_admin_01',
+    uploadsDir: paths.uploadsDir,
+  });
+
+  const diskPath = path.join(paths.uploadsDir, uploaded.filename);
+  assert.ok(fs.existsSync(diskPath));
+
+  // Simulate ephemeral disk loss across container rebuild
+  fs.rmSync(diskPath, { force: true });
+  assert.equal(fs.existsSync(diskPath), false);
+
+  const resolved = resolveUploadedAssetFile(db, uploaded.filename, paths.uploadsDir);
+  assert.ok(resolved);
+  assert.equal(Buffer.compare(resolved!.buffer, fakePng), 0);
+  // Also verifies it re-materialized back to disk
+  assert.equal(fs.existsSync(diskPath), true);
+  db.close();
+});
+
+test('9. Legacy v2 SETTINGS table migrates cleanly to BASE_CONFIGURATION without overwriting edited values', (t) => {
+  const { root, paths } = createTempPaths();
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const db1 = openAndInitializeDatabase(paths);
+  updateSettingsWithVersioning(db1, { app_name: 'CBT CUSTOM PRE-V3' }, 'usr_admin_01', { expectedVersion: 1 });
+  // Simulate pre-v3 schema state: drop BASE_CONFIGURATION and roll metadata back to 2.0.0
+  db1.exec('DROP TABLE BASE_CONFIGURATION;');
+  db1.prepare("DELETE FROM SCHEMA_MIGRATIONS WHERE version = '003_permanent_base_configuration'").run();
+  db1.prepare("UPDATE SYSTEM_METADATA SET meta_value = '2.0.0' WHERE meta_key = 'DATABASE_VERSION'").run();
+  db1.close();
+
+  const db2 = openAndInitializeDatabase(paths);
+  const cfg = getBaseConfigurationMap(db2, { strict: true });
+  assert.equal(cfg.app_name, 'CBT CUSTOM PRE-V3');
+  const migratedRow = db2
+    .prepare("SELECT config_value, source FROM BASE_CONFIGURATION WHERE config_key = 'app_name'")
+    .get() as { config_value: string; source: string };
+  assert.equal(migratedRow.config_value, 'CBT CUSTOM PRE-V3');
+  assert.equal(migratedRow.source, 'SUPER_ADMIN');
+  db2.close();
+});
+

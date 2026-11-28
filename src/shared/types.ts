@@ -369,6 +369,17 @@ export type SyncDomain =
 
 export type SyncVersionsMap = Record<SyncDomain, number>;
 
+export type BaseConfigSource = 'INITIAL_DEFAULT' | 'MIGRATED_SETTINGS' | 'SUPER_ADMIN' | 'ROLLBACK' | 'RESTORE';
+
+export interface BaseConfigRecord {
+  config_key: string;
+  config_value: string;
+  source: BaseConfigSource;
+  config_version: number;
+  updated_by: string;
+  updated_at: string;
+}
+
 export interface SystemSyncState {
   server_time: string;
   db_ok: boolean;
@@ -376,6 +387,8 @@ export interface SystemSyncState {
   app_version: string;
   db_version: string;
   config_version: number;
+  base_config_source?: BaseConfigSource;
+  base_config_updated_at?: string;
   last_save_at: string;
   last_backup_at: string;
   sync_versions: SyncVersionsMap;
@@ -429,6 +442,9 @@ export interface SystemMonitoringStatus {
   last_migration_version: string;
   database_initialized: boolean;
   config_version: number;
+  base_config_source: BaseConfigSource;
+  base_config_updated_at: string;
+  base_config_updated_by: string;
   last_save_at: string;
   last_backup_at: string;
   last_sync_check_at: string;

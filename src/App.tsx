@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppShell } from './components/AppShell';
 import { AppsScriptExportView } from './components/AppsScriptExportView';
 import {
@@ -25,18 +25,50 @@ import {
   AuditLogView,
   BackupRestoreView,
   ProfilePasswordView,
+  ServerMonitoringView,
   SettingsView,
 } from './components/SystemAdminViews';
 import { UserManagementView } from './components/UserManagementView';
-import { apiFetch, setMemoryToken } from './utils/api';
-import type { AppSettingsMap, NotificationRecord, UserRecord } from './shared/types';
+import {
+  apiFetch,
+  setMemoryToken,
+  subscribeConnectionState,
+  type ServerConnectionState,
+} from './utils/api';
+import type {
+  AppSettingsMap,
+  NotificationRecord,
+  SyncVersionsMap,
+  UserRecord,
+} from './shared/types';
+
+const INITIAL_SYNC_VERSIONS: SyncVersionsMap = {
+  config: 0,
+  users: 0,
+  questions: 0,
+  exams: 0,
+  results: 0,
+  documents: 0,
+  backups: 0,
+};
 
 export default function App() {
   const [config, setConfig] = useState<Partial<AppSettingsMap>>({});
+  const [configError, setConfigError] = useState<string | null>(null);
   const [user, setUser] = useState<UserRecord | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [activeNav, setActiveNav] = useState('dashboard');
   const [notifications, setNotifications] = useState<NotificationRecord[]>([]);
+
+  // Cross-device sync & server connection state
+  const [connectionState, setConnectionState] = useState<ServerConnectionState>('online');
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [lastSyncAt, setLastSyncAt] = useState<string | null>(null);
+  const [syncVersions, setSyncVersions] = useState<SyncVersionsMap>(INITIAL_SYNC_VERSIONS);
+  const configVersionRef = useRef<number>(0);
+  const syncVersionsRef = useRef<SyncVersionsMap>(INITIAL_SYNC_VERSIONS);
+  const syncInFlightRef = useRef(false);
 
   // Active CBT Runner examId (persisted in URL search param so page refresh resumes exam!)
   const [activeExamId, setActiveExamId] = useState<string | null>(() => {
@@ -55,10 +87,24 @@ export default function App() {
 
   const loadPublicConfig = useCallback(async () => {
     try {
-      const cfg = await apiFetch<Partial<AppSettingsMap>>('/public/config');
+      const cfg = await apiFetch<
+        Partial<AppSettingsMap> & { config_version?: number }
+      >('/public/config');
       setConfig(cfg);
-    } catch {
-      // Fallback to default visual config
+      setConfigError(null);
+      if (typeof cfg.config_version === 'number') {
+        configVersionRef.current = cfg.config_version;
+      }
+      if (cfg.app_name) {
+        document.title = cfg.app_name;
+      }
+    } catch (err) {
+      // Never overwrite existing loaded config or silently fallback to defaults
+      setConfigError(
+        err instanceof Error
+          ? err.message
+          : 'Konfigurasi server tidak dapat dibaca dari database.',
+      );
     }
   }, []);
 
@@ -91,8 +137,84 @@ export default function App() {
         setStudentExams((res.exams as StudentExamRow[]) || []);
       }
     } catch {
-      // Ignore transient load error
+      // Handled by connection listener when server fails
     }
+  }, []);
+
+  const syncNow = useCallback(async () => {
+    if (syncInFlightRef.current) return;
+    syncInFlightRef.current = true;
+    setSyncing(true);
+    try {
+      const state = await apiFetch<{
+        server_time: string;
+        db_ok: boolean;
+        config_version: number;
+        sync_versions: Partial<SyncVersionsMap>;
+      }>('/sync/version');
+
+      setLastSyncAt(state.server_time || new Date().toISOString());
+      setConnectionError(null);
+
+      const prevCfgVer = configVersionRef.current;
+      if (state.config_version !== prevCfgVer) {
+        configVersionRef.current = state.config_version;
+        await loadPublicConfig();
+      }
+
+      const incoming = state.sync_versions || {};
+      const prevVersions = syncVersionsRef.current;
+      const merged: SyncVersionsMap = {
+        config: incoming.config ?? prevVersions.config,
+        users: incoming.users ?? prevVersions.users,
+        questions: incoming.questions ?? prevVersions.questions,
+        exams: incoming.exams ?? prevVersions.exams,
+        results: incoming.results ?? prevVersions.results,
+        documents: incoming.documents ?? prevVersions.documents,
+        backups: incoming.backups ?? prevVersions.backups,
+      };
+
+      const changed =
+        merged.config !== prevVersions.config ||
+        merged.users !== prevVersions.users ||
+        merged.questions !== prevVersions.questions ||
+        merged.exams !== prevVersions.exams ||
+        merged.results !== prevVersions.results ||
+        merged.documents !== prevVersions.documents ||
+        merged.backups !== prevVersions.backups;
+
+      if (changed) {
+        const hadBaseline =
+          prevVersions.config > 0 ||
+          prevVersions.users > 0 ||
+          prevVersions.exams > 0;
+        syncVersionsRef.current = merged;
+        setSyncVersions(merged);
+        if (hadBaseline && user) {
+          void loadDashboardData();
+          void loadNotifications();
+        }
+      }
+    } catch (err) {
+      setConnectionError(
+        err instanceof Error ? err.message : 'Gagal menyinkronkan status dengan server.',
+      );
+    } finally {
+      syncInFlightRef.current = false;
+      setSyncing(false);
+    }
+  }, [loadDashboardData, loadNotifications, loadPublicConfig, user]);
+
+  // Subscribe to API connection status changes
+  useEffect(() => {
+    return subscribeConnectionState((state, msg) => {
+      setConnectionState(state);
+      if (state === 'online') {
+        setConnectionError(null);
+      } else if (msg) {
+        setConnectionError(msg);
+      }
+    });
   }, []);
 
   // Bootstrap config + restore active HttpOnly session on reload
@@ -109,6 +231,7 @@ export default function App() {
       } finally {
         setInitializing(false);
       }
+      void syncNow();
     };
     void boot();
   }, [loadPublicConfig]);
@@ -117,7 +240,49 @@ export default function App() {
     if (!user) return;
     void loadDashboardData();
     void loadNotifications();
+    void syncNow();
   }, [user, activeNav, loadDashboardData, loadNotifications]);
+
+  // Cross-device version polling every 10s + on window focus/visibility/online
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void syncNow();
+      }
+    }, 10000);
+
+    const handleVisibilityOrFocus = () => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+        void syncNow();
+      }
+    };
+
+    const handleOnline = () => {
+      setConnectionState('online');
+      setConnectionError(null);
+      void syncNow();
+    };
+
+    const handleOffline = () => {
+      setConnectionState('offline');
+      setConnectionError(
+        'Perangkat sedang offline. Perubahan tertunda tidak disimpan sebelum koneksi pulih.',
+      );
+    };
+
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [syncNow]);
 
   const handleLoginSuccess = (payload: {
     token: string;
@@ -161,6 +326,18 @@ export default function App() {
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: 1 })));
   };
 
+  const handleConfigUpdated = () => {
+    void loadPublicConfig();
+    void syncNow();
+  };
+
+  const handleDatabaseChanged = () => {
+    void loadPublicConfig();
+    void loadDashboardData();
+    void loadNotifications();
+    void syncNow();
+  };
+
   if (initializing) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 text-sm text-slate-600">
@@ -170,7 +347,17 @@ export default function App() {
   }
 
   if (!user) {
-    return <LoginView config={config} onLoginSuccess={handleLoginSuccess} />;
+    return (
+      <LoginView
+        config={config}
+        configError={configError}
+        onRetryConfig={() => {
+          void loadPublicConfig();
+          void syncNow();
+        }}
+        onLoginSuccess={handleLoginSuccess}
+      />
+    );
   }
 
   // Focused OSN-style CBT Exam Runner for Siswa
@@ -197,39 +384,116 @@ export default function App() {
             />
           );
         case 'users':
-          return <UserManagementView currentUser={user} />;
+          return <UserManagementView currentUser={user} syncTick={syncVersions.users} />;
         case 'professors':
-          return <UserManagementView currentUser={user} lockedRoleFilter="PROFESSOR" />;
+          return (
+            <UserManagementView
+              currentUser={user}
+              lockedRoleFilter="PROFESSOR"
+              syncTick={syncVersions.users}
+            />
+          );
         case 'students':
-          return <UserManagementView currentUser={user} lockedRoleFilter="SISWA" />;
+          return (
+            <UserManagementView
+              currentUser={user}
+              lockedRoleFilter="SISWA"
+              syncTick={syncVersions.users}
+            />
+          );
         case 'questions':
-          return <QuestionBankView />;
+          return <QuestionBankView syncTick={syncVersions.questions} />;
         case 'create_question':
-          return <QuestionBankView openCreatorImmediately />;
+          return <QuestionBankView openCreatorImmediately syncTick={syncVersions.questions} />;
         case 'exams':
-          return <ExamManagerView currentUser={user} />;
+          return (
+            <ExamManagerView
+              currentUser={user}
+              syncTick={syncVersions.exams + syncVersions.questions + syncVersions.users}
+            />
+          );
         case 'create_exam':
-          return <ExamManagerView currentUser={user} openBuilderImmediately />;
+          return (
+            <ExamManagerView
+              currentUser={user}
+              openBuilderImmediately
+              syncTick={syncVersions.exams + syncVersions.questions + syncVersions.users}
+            />
+          );
         case 'monitoring':
           return <MonitoringView />;
         case 'essay_grading':
           return <EssayGradingView />;
         case 'results':
-          return <ResultsManagementView config={config} currentUser={user} />;
+          return (
+            <ResultsManagementView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'leaderboard':
-          return <LeaderboardView />;
+          return (
+            <LeaderboardView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'analytics':
-          return <ItemAnalysisView />;
+          return (
+            <ItemAnalysisView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'reports':
-          return <ReportsAndBeritaAcaraView config={config} currentUser={user} />;
+          return (
+            <ReportsAndBeritaAcaraView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.documents + syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'audit':
           return <AuditLogView />;
         case 'backup':
-          return <BackupRestoreView />;
+          return (
+            <BackupRestoreView
+              syncTick={syncVersions.backups}
+              onDatabaseRestored={handleDatabaseChanged}
+            />
+          );
+        case 'server_monitoring':
+          return (
+            <ServerMonitoringView
+              syncTick={
+                syncVersions.config +
+                syncVersions.backups +
+                syncVersions.users +
+                syncVersions.exams +
+                syncVersions.questions
+              }
+              onDatabaseChanged={handleDatabaseChanged}
+            />
+          );
         case 'settings_app':
-          return <SettingsView mode="APP" onConfigUpdated={loadPublicConfig} />;
+          return (
+            <SettingsView
+              mode="APP"
+              syncTick={syncVersions.config}
+              onConfigUpdated={handleConfigUpdated}
+            />
+          );
         case 'settings_security':
-          return <SettingsView mode="SECURITY" onConfigUpdated={loadPublicConfig} />;
+          return (
+            <SettingsView
+              mode="SECURITY"
+              syncTick={syncVersions.config}
+              onConfigUpdated={handleConfigUpdated}
+            />
+          );
         case 'gas_export':
           return <AppsScriptExportView />;
         default:
@@ -242,27 +506,68 @@ export default function App() {
         case 'dashboard':
           return <ProfessorDashboardView stats={profStats} onNavigate={setActiveNav} />;
         case 'questions':
-          return <QuestionBankView />;
+          return <QuestionBankView syncTick={syncVersions.questions} />;
         case 'create_question':
-          return <QuestionBankView openCreatorImmediately />;
+          return <QuestionBankView openCreatorImmediately syncTick={syncVersions.questions} />;
         case 'create_exam':
-          return <ExamManagerView currentUser={user} openBuilderImmediately />;
+          return (
+            <ExamManagerView
+              currentUser={user}
+              openBuilderImmediately
+              syncTick={syncVersions.exams + syncVersions.questions + syncVersions.users}
+            />
+          );
         case 'exams':
-          return <ExamManagerView currentUser={user} />;
+          return (
+            <ExamManagerView
+              currentUser={user}
+              syncTick={syncVersions.exams + syncVersions.questions + syncVersions.users}
+            />
+          );
         case 'students':
-          return <UserManagementView currentUser={user} lockedRoleFilter="SISWA" />;
+          return (
+            <UserManagementView
+              currentUser={user}
+              lockedRoleFilter="SISWA"
+              syncTick={syncVersions.users}
+            />
+          );
         case 'monitoring':
           return <MonitoringView />;
         case 'essay_grading':
           return <EssayGradingView />;
         case 'results':
-          return <ResultsManagementView config={config} currentUser={user} />;
+          return (
+            <ResultsManagementView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'analytics':
-          return <ItemAnalysisView />;
+          return (
+            <ItemAnalysisView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'leaderboard':
-          return <LeaderboardView />;
+          return (
+            <LeaderboardView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.results + syncVersions.exams}
+            />
+          );
         case 'reports':
-          return <ReportsAndBeritaAcaraView config={config} currentUser={user} />;
+          return (
+            <ReportsAndBeritaAcaraView
+              config={config}
+              currentUser={user}
+              syncTick={syncVersions.documents + syncVersions.results + syncVersions.exams}
+            />
+          );
         default:
           return null;
       }
@@ -281,7 +586,13 @@ export default function App() {
           />
         );
       case 'leaderboard':
-        return <LeaderboardView />;
+        return (
+          <LeaderboardView
+            config={config}
+            currentUser={user}
+            syncTick={syncVersions.results + syncVersions.exams}
+          />
+        );
       case 'profile':
         return <ProfilePasswordView />;
       default:
@@ -298,6 +609,11 @@ export default function App() {
       onLogout={handleLogout}
       notifications={notifications}
       onMarkNotificationsRead={markNotificationsRead}
+      connectionState={connectionState}
+      syncing={syncing}
+      lastSyncAt={lastSyncAt}
+      connectionError={connectionError || configError}
+      onManualSync={() => void syncNow()}
     >
       {renderMainContent()}
       {viewingStudentResultExamId && (

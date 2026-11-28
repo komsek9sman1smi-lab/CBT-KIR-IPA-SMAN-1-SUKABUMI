@@ -30,9 +30,11 @@ import type { AppSettingsMap, ExamRecord, UserRecord } from '../shared/types';
 export function ResultsManagementView({
   config,
   currentUser,
+  syncTick = 0,
 }: {
   config: Partial<AppSettingsMap>;
   currentUser: UserRecord;
+  syncTick?: number;
 }) {
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState('');
@@ -67,9 +69,9 @@ export function ResultsManagementView({
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
       setExams(res.exams);
       const pref = res.exams.find((e) => e.status === 'COMPLETED') || res.exams[0];
-      if (pref) setSelectedExamId(pref.exam_id);
+      if (pref) setSelectedExamId((prev) => prev || pref.exam_id);
     });
-  }, []);
+  }, [syncTick]);
 
   const loadResults = async (examId: string) => {
     if (!examId) return;
@@ -87,6 +89,12 @@ export function ResultsManagementView({
       void loadResults(selectedExamId);
     }
   }, [selectedExamId]);
+
+  useEffect(() => {
+    if (syncTick > 0 && selectedExamId && !correctModal) {
+      void loadResults(selectedExamId);
+    }
+  }, [syncTick, selectedExamId]);
 
   const selectedExam = exams.find((e) => e.exam_id === selectedExamId);
   const uniqueClasses = useMemo(
@@ -762,9 +770,11 @@ export function ResultsManagementView({
 export function LeaderboardView({
   config,
   currentUser,
+  syncTick = 0,
 }: {
   config?: Partial<AppSettingsMap>;
   currentUser?: UserRecord;
+  syncTick?: number;
 } = {}) {
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState('');
@@ -776,9 +786,9 @@ export function LeaderboardView({
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
       setExams(res.exams);
       const pref = res.exams.find((e) => e.status === 'COMPLETED') || res.exams[0];
-      if (pref) setSelectedExamId(pref.exam_id);
+      if (pref) setSelectedExamId((prev) => prev || pref.exam_id);
     });
-  }, []);
+  }, [syncTick]);
 
   useEffect(() => {
     if (!selectedExamId) return;
@@ -789,7 +799,7 @@ export function LeaderboardView({
         setLeaderboard([]);
         setError(err instanceof Error ? err.message : 'Leaderboard tidak tersedia.');
       });
-  }, [selectedExamId]);
+  }, [selectedExamId, syncTick]);
 
   const selectedExam = exams.find((e) => e.exam_id === selectedExamId);
 
@@ -942,9 +952,11 @@ export function LeaderboardView({
 export function ItemAnalysisView({
   config,
   currentUser,
+  syncTick = 0,
 }: {
   config?: Partial<AppSettingsMap>;
   currentUser?: UserRecord;
+  syncTick?: number;
 } = {}) {
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState('');
@@ -956,9 +968,9 @@ export function ItemAnalysisView({
     void apiFetch<{ exams: ExamRecord[] }>('/exams').then((res) => {
       setExams(res.exams);
       const pref = res.exams.find((e) => e.status === 'COMPLETED') || res.exams[0];
-      if (pref) setSelectedExamId(pref.exam_id);
+      if (pref) setSelectedExamId((prev) => prev || pref.exam_id);
     });
-  }, []);
+  }, [syncTick]);
 
   useEffect(() => {
     if (!selectedExamId) return;
@@ -968,7 +980,7 @@ export function ItemAnalysisView({
       setTotalRespondents(res.total_respondents);
       setAnalysis(res.analysis);
     });
-  }, [selectedExamId]);
+  }, [selectedExamId, syncTick]);
 
   const selectedExam = exams.find((e) => e.exam_id === selectedExamId);
 
@@ -1222,11 +1234,13 @@ export function ItemAnalysisView({
 export function ReportsAndBeritaAcaraView({
   config,
   currentUser,
+  syncTick = 0,
 }: {
   config: Partial<AppSettingsMap>;
   currentUser: UserRecord;
+  syncTick?: number;
 }) {
-  return <OfficialDocumentStudio config={config} currentUser={currentUser} />;
+  return <OfficialDocumentStudio config={config} currentUser={currentUser} syncTick={syncTick} />;
 }
 
 export function StudentResultDetailModal({

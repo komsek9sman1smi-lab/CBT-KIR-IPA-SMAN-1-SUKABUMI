@@ -6,10 +6,17 @@ import type { AppSettingsMap, UserRecord } from '../shared/types';
 
 interface LoginViewProps {
   config: Partial<AppSettingsMap>;
+  configError?: string | null;
+  onRetryConfig?: () => void;
   onLoginSuccess: (payload: { token: string; session_id: string; user: UserRecord }) => void;
 }
 
-export function LoginView({ config, onLoginSuccess }: LoginViewProps) {
+export function LoginView({
+  config,
+  configError,
+  onRetryConfig,
+  onLoginSuccess,
+}: LoginViewProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -57,6 +64,26 @@ export function LoginView({ config, onLoginSuccess }: LoginViewProps) {
             </p>
           </div>
         </div>
+
+        {configError && (
+          <div
+            role="alert"
+            className="p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 flex items-center justify-between gap-2"
+          >
+            <span>
+              <strong>Konfigurasi Server Gagal Dimuat:</strong> {configError}
+            </span>
+            {onRetryConfig && (
+              <button
+                type="button"
+                onClick={onRetryConfig}
+                className="px-2.5 py-1 rounded bg-amber-800 text-white font-semibold shrink-0 cursor-pointer"
+              >
+                Coba Lagi
+              </button>
+            )}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>

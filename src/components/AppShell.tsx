@@ -19,13 +19,17 @@ import {
   Menu,
   PenSquare,
   PlusCircle,
+  RefreshCw,
+  Server,
   Settings,
   ShieldAlert,
   UserCheck,
   Users,
+  WifiOff,
   X,
 } from 'lucide-react';
 import { AppLogo } from './AppLogo';
+import type { ServerConnectionState } from '../utils/api';
 import type { AppSettingsMap, NotificationRecord, UserRecord } from '../shared/types';
 
 export interface NavItem {
@@ -42,6 +46,11 @@ interface AppShellProps {
   onLogout: () => void;
   notifications: NotificationRecord[];
   onMarkNotificationsRead: () => void;
+  connectionState?: ServerConnectionState;
+  syncing?: boolean;
+  lastSyncAt?: string | null;
+  connectionError?: string | null;
+  onManualSync?: () => void;
   children: ReactNode;
 }
 
@@ -62,6 +71,7 @@ export function getNavItemsForRole(role: UserRecord['role']): NavItem[] {
       { id: 'reports', label: 'Laporan & Berita Acara', icon: <FileText className="w-4 h-4" /> },
       { id: 'audit', label: 'Audit Log', icon: <History className="w-4 h-4" /> },
       { id: 'backup', label: 'Backup Database', icon: <DatabaseBackup className="w-4 h-4" /> },
+      { id: 'server_monitoring', label: 'Monitoring Server', icon: <Server className="w-4 h-4" /> },
       { id: 'settings_app', label: 'Pengaturan Aplikasi', icon: <Settings className="w-4 h-4" /> },
       { id: 'settings_security', label: 'Pengaturan Keamanan', icon: <Lock className="w-4 h-4" /> },
       { id: 'gas_export', label: 'Paket Apps Script', icon: <Code2 className="w-4 h-4" /> },
@@ -100,6 +110,11 @@ export function AppShell({
   onLogout,
   notifications,
   onMarkNotificationsRead,
+  connectionState = 'online',
+  syncing = false,
+  lastSyncAt = null,
+  connectionError = null,
+  onManualSync,
   children,
 }: AppShellProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -123,9 +138,11 @@ export function AppShell({
           <AppLogo src={config.logo_url} sizeClass="w-10 h-10" />
           <div className="min-w-0">
             <div className="text-sm font-bold leading-tight truncate text-white">
-              CBT KIR IPA
+              {config.app_name || 'CBT KIR IPA'}
             </div>
-            <div className="text-xs text-amber-300 truncate">SMAN 1 Sukabumi</div>
+            <div className="text-xs text-amber-300 truncate">
+              {config.school_name || 'SMAN 1 Sukabumi'}
+            </div>
           </div>
         </div>
 
@@ -245,7 +262,39 @@ export function AppShell({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0 relative">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0 relative">
+            <button
+              type="button"
+              onClick={onManualSync}
+              title={
+                lastSyncAt
+                  ? `Sinkronisasi server otomatis setiap 10 detik. Terakhir: ${new Date(lastSyncAt).toLocaleTimeString('id-ID')}`
+                  : 'Periksa sinkronisasi server'
+              }
+              className={`hidden md:inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium cursor-pointer transition-colors ${
+                connectionState === 'online'
+                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800 hover:bg-emerald-100'
+                  : 'bg-red-50 border-red-200 text-red-700 hover:bg-red-100'
+              }`}
+            >
+              {connectionState === 'online' ? (
+                <RefreshCw className={`w-3 h-3 ${syncing ? 'animate-spin' : ''}`} />
+              ) : (
+                <WifiOff className="w-3 h-3" />
+              )}
+              <span>
+                {connectionState === 'offline'
+                  ? 'Offline'
+                  : connectionState === 'server_error'
+                    ? 'Gangguan Server'
+                    : syncing
+                      ? 'Menyinkronkan...'
+                      : lastSyncAt
+                        ? `Tersinkron ${new Date(lastSyncAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`
+                        : 'Server Terhubung'}
+              </span>
+            </button>
+
             <button
               type="button"
               aria-label="Notifikasi"
@@ -303,6 +352,27 @@ export function AppShell({
             </div>
           </div>
         </header>
+
+        {connectionState !== 'online' && (
+          <div className="bg-red-50 border-b border-red-200 px-4 sm:px-6 py-2.5 text-xs text-red-800 flex flex-wrap items-center justify-between gap-2 no-print">
+            <div className="flex items-center gap-2 font-medium">
+              <WifiOff className="w-4 h-4 shrink-0" />
+              <span>
+                {connectionError ||
+                  'Koneksi ke server atau database terputus. Perubahan tidak dapat disimpan permanen dan aplikasi tidak mereset data.'}
+              </span>
+            </div>
+            {onManualSync && (
+              <button
+                type="button"
+                onClick={onManualSync}
+                className="px-2.5 py-1 rounded bg-red-700 text-white font-semibold hover:bg-red-800 cursor-pointer"
+              >
+                Coba Sinkron Ulang
+              </button>
+            )}
+          </div>
+        )}
 
         <main className="flex-1 p-4 sm:p-6 max-w-7xl w-full mx-auto">{children}</main>
       </div>

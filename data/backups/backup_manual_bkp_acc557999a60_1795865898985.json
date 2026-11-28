@@ -1,0 +1,1837 @@
+{
+  "backup_id": "bkp_acc557999a60",
+  "backup_type": "MANUAL",
+  "app_version": "2.2.0",
+  "db_version": "2.0.0",
+  "created_at": "2026-11-28T11:38:18.985Z",
+  "created_by": "usr_admin_01",
+  "record_counts": {
+    "USERS": 10,
+    "EXAMS": 2,
+    "QUESTIONS": 9,
+    "EXAM_QUESTIONS": 12,
+    "EXAM_PARTICIPANTS": 13,
+    "ANSWERS": 34,
+    "VIOLATION_LOGS": 11,
+    "RESULTS": 7,
+    "SETTINGS": 15,
+    "AUDIT_LOGS": 60,
+    "EXAM_LOGS": 5,
+    "ESSAY_GRADES": 6,
+    "EXAM_CATEGORIES": 4,
+    "NOTIFICATIONS": 2,
+    "REPORT_TEMPLATES": 4,
+    "OFFICIAL_DOCUMENTS": 0,
+    "CONFIG_VERSIONS": 2,
+    "APP_ASSETS": 1,
+    "SYSTEM_METADATA": 16
+  },
+  "snapshot": {
+    "USERS": [
+      {
+        "user_id": "usr_admin_01",
+        "username": "aetherium22",
+        "password_hash": "51521612da904dd6ce012f411021615b9206a37979347bbb2797f99d153b107bdfa05bee39d31cfef0c1527fe0bcdebca6ad959c23d929773a92b8b034aa6fdd",
+        "password_salt": "4f26b2bc9da8e467490e614449299bc3",
+        "nama": "Drs. Hendra Wijaya, M.Pd.",
+        "kelas": "Pembina Utama",
+        "role": "SUPER_ADMIN",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_prof_01",
+        "username": "prof.fisika",
+        "password_hash": "303252126d58ec479c2cf9c39e52dbb44359c1a2ed4a9a98d38077086ba6ea42a50345efd48131e566e7d0ad693140337b126b73919917e60a75cd5e23e96732",
+        "password_salt": "b409e6ebed8aa3d770b2d51974aa19b1",
+        "nama": "Siti Nurhaliza, S.Si., M.Sc.",
+        "kelas": "Divisi Fisika & Astronomi",
+        "role": "PROFESSOR",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_prof_02",
+        "username": "prof.biokimia",
+        "password_hash": "cdfa101ab37178043afdaedfef156fd51fc664713319f85d6b24505e7533c898bf4c8859a470378f1bad604777caa7c05148bc21d93877a68a45403340fc7fd1",
+        "password_salt": "a52b340776f4c76b2e73895bf3ced72a",
+        "nama": "Dr. Bagus Prasetyo, M.Si.",
+        "kelas": "Divisi Biologi & Kimia",
+        "role": "PROFESSOR",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_01",
+        "username": "siswa01",
+        "password_hash": "5c7bef6ebd21695faa5302b37b848c7c9fd4ba0ef96f516475f2afb93e46e15c7f36429a53b82783bd45d443321e1e38bc88e9396002ee49e9843d3997ebadaf",
+        "password_salt": "461e88df319f4f427edff71cba64812e",
+        "nama": "Nadia Putri Ramadhani",
+        "kelas": "XI-IPA-1",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_02",
+        "username": "siswa02",
+        "password_hash": "2f8540910ccfde060a111601bb433dfad608262bb0f3b27fc7fb61fd3b1d4468f95fac0f85a836fed15d5cfb9dd112439c028fc9e812960b447d28db1b741398",
+        "password_salt": "468876567fc1c95ceb3316b705c3f77c",
+        "nama": "Rafi Ahmad Fauzan",
+        "kelas": "XI-IPA-1",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_03",
+        "username": "siswa03",
+        "password_hash": "c3286d52338849b6d2c5ec2d18c2f87c33744d13d0b21197c42ae2c6fc59f193baae83bfe487a73bf6dd02f2b1439bf6680b2191cc00dac12f678eddb57a8689",
+        "password_salt": "c3bff728f36b5c68cdedfdaacd6380fc",
+        "nama": "Aulia Zahra Maharani",
+        "kelas": "XI-IPA-2",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_04",
+        "username": "siswa04",
+        "password_hash": "9945455f9abc93dbe3a343d4d0f72dc1247d5723fb0f9518f108faf09c32a5d6c3beef595b1b68eeea1ed7a199d396fc2784f7de59a82bc9568e3119979316dd",
+        "password_salt": "9fb02da5cd9c2cb28035dcbcbda5babf",
+        "nama": "Dimas Pratama Putra",
+        "kelas": "X-MIPA-1",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_05",
+        "username": "siswa05",
+        "password_hash": "8247966cff89bc0c9a3e9836d1ef0e18a7dde54de11b6152522f0814ce121068869f895476925941c42ba0b8b5dde7bca3d8a37b6dee9d18c7b6d413cf6858b0",
+        "password_salt": "0286afab80c698db58022d6e9fe5e021",
+        "nama": "Keisha Permata Sari",
+        "kelas": "XII-IPA-1",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_06",
+        "username": "siswa06",
+        "password_hash": "b104f0038315e8222219f2765ccd232a10e3423eefde37cfaddcffd133511f4347f022b80bed43c644efb0ef6733a655c0fdd008602ecb29cb63bd7c3430777b",
+        "password_salt": "99d04a2707600b85224478b0dfbc46b3",
+        "nama": "Fajar Maulana Hakim",
+        "kelas": "XI-IPA-2",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "user_id": "usr_siswa_07",
+        "username": "siswa07",
+        "password_hash": "ec66a19344970009b5a7aebc16704c2228c8a33cb17b42562d3615cade5fe63318440e7b5e9ece43a6222706aa4324f886513b8450f414cf55d7cac758ef74c5",
+        "password_salt": "eac9556cd43e61c4041f60705e42dd37",
+        "nama": "Salsabila Khoirunnisa",
+        "kelas": "X-MIPA-2",
+        "role": "SISWA",
+        "status": "ACTIVE",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      }
+    ],
+    "EXAMS": [
+      {
+        "exam_id": "exm_osn_2026",
+        "title": "Seleksi Internal OSN & Riset KIR IPA 2026",
+        "description": "Ujian seleksi dan pemetaan kompetensi anggota KIR IPA SMAN 1 Sukabumi mencakup Fisika, Kimia, Biologi, dan Metode Ilmiah.",
+        "subject": "Sains Terpadu (IPA)",
+        "start_time": "2026-11-20T22:26:43.564Z",
+        "end_time": "2026-11-27T23:26:43.564Z",
+        "duration": 60,
+        "status": "ACTIVE",
+        "total_questions": 7,
+        "created_by": "usr_prof_01",
+        "settings_json": "{\"exam_type\":\"SIMULASI_OSN\",\"total_score_target\":100,\"passing_grade\":70,\"target_classes\":[\"ALL\"],\"shuffle_questions\":false,\"shuffle_options\":false,\"allow_free_navigation\":true,\"max_attempts\":1,\"show_result_after_publish\":true,\"show_explanation_after_publish\":true,\"show_leaderboard\":true,\"leaderboard_anonymous\":false,\"anti_cheat_tab_switch\":true,\"anti_cheat_fullscreen\":true,\"anti_cheat_block_copy\":true,\"anti_cheat_block_context_menu\":true,\"anti_cheat_single_session\":true}"
+      },
+      {
+        "exam_id": "exm_tryout_01",
+        "title": "Tryout Dasar Olimpiade Sains Tahap 1",
+        "description": "Evaluasi pemahaman konsep dasar mekanika, termokimia, dan biologi sel anggota baru KIR IPA.",
+        "subject": "IPA Terpadu",
+        "start_time": "2026-11-13T23:26:43.564Z",
+        "end_time": "2026-11-14T23:26:43.564Z",
+        "duration": 45,
+        "status": "COMPLETED",
+        "total_questions": 5,
+        "created_by": "usr_prof_01",
+        "settings_json": "{\"exam_type\":\"EVALUASI\",\"total_score_target\":100,\"passing_grade\":75,\"target_classes\":[\"ALL\"],\"shuffle_questions\":false,\"shuffle_options\":false,\"allow_free_navigation\":true,\"max_attempts\":1,\"show_result_after_publish\":true,\"show_explanation_after_publish\":true,\"show_leaderboard\":true,\"leaderboard_anonymous\":false,\"anti_cheat_tab_switch\":true,\"anti_cheat_fullscreen\":true,\"anti_cheat_block_copy\":true,\"anti_cheat_block_context_menu\":true,\"anti_cheat_single_session\":true}"
+      }
+    ],
+    "QUESTIONS": [
+      {
+        "question_id": "q_pg_fisika_01",
+        "question_type": "PG",
+        "question_text": "<p>Sebuah benda bermassa $m = 2\\text{ kg}$ bergerak harmonik sederhana dengan persamaan simpangan $y(t) = 0{,}1 \\sin(10t)$ dalam satuan SI. Berapakah energi mekanik total benda tersebut?</p>",
+        "options_json": "{\"choices\":[{\"id\":\"A\",\"label\":\"A\",\"text\":\"$0{,}5\\\\text{ J}$\"},{\"id\":\"B\",\"label\":\"B\",\"text\":\"$1{,}0\\\\text{ J}$\"},{\"id\":\"C\",\"label\":\"C\",\"text\":\"$2{,}0\\\\text{ J}$\"},{\"id\":\"D\",\"label\":\"D\",\"text\":\"$5{,}0\\\\text{ J}$\"},{\"id\":\"E\",\"label\":\"E\",\"text\":\"$10{,}0\\\\text{ J}$\"}]}",
+        "correct_answer": "B",
+        "explanation": "Energi mekanik gerak harmonik sederhana: $E_m = \\frac{1}{2} m \\omega^2 A^2 = \\frac{1}{2}(2)(10)^2(0{,}1)^2 = 1{,}0\\text{ J}$.",
+        "image_url": "",
+        "category": "Fisika",
+        "materi": "Getaran Harmonik Sederhana",
+        "difficulty": "SEDANG",
+        "score": 10,
+        "created_by": "usr_prof_01",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_pgk_kimia_01",
+        "question_type": "PGK",
+        "question_text": "<p>Perhatikan reaksi pembakaran sempurna gas metana berikut:</p><p>$$\\text{CH}_4(g) + 2\\text{O}_2(g) \\rightarrow \\text{CO}_2(g) + 2\\text{H}_2\\text{O}(g) \\quad \\Delta H = -890\\text{ kJ/mol}$$</p><p>Pernyataan berikut yang <strong>BENAR</strong> mengenai reaksi tersebut adalah (pilih lebih dari satu):</p>",
+        "options_json": "{\"choices\":[{\"id\":\"A\",\"label\":\"A\",\"text\":\"Reaksi bersifat eksoterm karena $\\\\Delta H < 0$.\"},{\"id\":\"B\",\"label\":\"B\",\"text\":\"Pembakaran $0{,}5\\\\text{ mol}$ $\\\\text{CH}_4$ melepaskan kalor $445\\\\text{ kJ}$.\"},{\"id\":\"C\",\"label\":\"C\",\"text\":\"Total koefisien reaktan lebih besar daripada produk.\"},{\"id\":\"D\",\"label\":\"D\",\"text\":\"Pembentukan $2\\\\text{ mol}$ $\\\\text{CO}_2$ membutuhkan $4\\\\text{ mol}$ $\\\\text{O}_2$.\"},{\"id\":\"E\",\"label\":\"E\",\"text\":\"Entalpi sistem meningkat setelah reaksi berlangsung.\"}],\"pgk_scoring\":\"PARTIAL\",\"pgk_penalty\":2}",
+        "correct_answer": "[\"A\",\"B\",\"D\"]",
+        "explanation": "Reaksi eksoterm melepaskan kalor ($\\Delta H < 0$). $0{,}5\\text{ mol}$ melepaskan $445\\text{ kJ}$, dan perbandingan stoikiometri $\\text{O}_2 : \\text{CO}_2 = 2 : 1$.",
+        "image_url": "",
+        "category": "Kimia",
+        "materi": "Termokimia & Stoikiometri",
+        "difficulty": "SULIT",
+        "score": 15,
+        "created_by": "usr_prof_02",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_bs_biologi_01",
+        "question_type": "BENAR_SALAH",
+        "question_text": "<p><strong>Pernyataan:</strong> Pada fase terang fotosintesis tumbuhan C3, fotolisis molekul air ($\\text{H}_2\\text{O}$) terjadi di stroma kloroplas dan menghasilkan gas $\\text{CO}_2$ sebagai produk sampingan.</p>",
+        "options_json": "{}",
+        "correct_answer": "SALAH",
+        "explanation": "Fotolisis air terjadi di <strong>lumen tilakoid</strong> (bukan stroma) pada Fotosistem II dan menghasilkan gas oksigen ($\\text{O}_2$), proton ($\\text{H}^+$), serta elektron.",
+        "image_url": "",
+        "category": "Biologi",
+        "materi": "Metabolisme & Fotosintesis",
+        "difficulty": "MUDAH",
+        "score": 10,
+        "created_by": "usr_prof_02",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_isian_kimia_01",
+        "question_type": "ISIAN_SINGKAT",
+        "question_text": "<p>Hitunglah $\\text{pH}$ larutan asam kuat $\\text{HCl}$ dengan konsentrasi $0{,}01\\text{ M}$ pada suhu $25^\\circ\\text{C}$. (Tuliskan angka saja)</p>",
+        "options_json": "{\"accepted_answers\":[\"2\",\"2.0\",\"2,0\"],\"case_sensitive\":false}",
+        "correct_answer": "2",
+        "explanation": "Karena $\\text{HCl}$ terionisasi sempurna: $[\\text{H}^+] = 10^{-2}\\text{ M}$, maka $\\text{pH} = -\\log(10^{-2}) = 2$.",
+        "image_url": "",
+        "category": "Kimia",
+        "materi": "Kesetimbangan Asam Basa",
+        "difficulty": "MUDAH",
+        "score": 10,
+        "created_by": "usr_prof_02",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_jodoh_fisika_01",
+        "question_type": "MENJODOHKAN",
+        "question_text": "<p>Pasangkan besaran fisika di kolom kiri dengan satuan SI atau rumus dimensi yang tepat di kolom kanan:</p>",
+        "options_json": "{\"matching_pairs\":[{\"id\":\"p1\",\"left\":\"Gaya ($F$)\",\"right\":\"Newton ($\\\\text{kg}\\\\cdot\\\\text{m}/\\\\text{s}^2$)\"},{\"id\":\"p2\",\"left\":\"Usaha & Energi ($W$)\",\"right\":\"Joule ($\\\\text{kg}\\\\cdot\\\\text{m}^2/\\\\text{s}^2$)\"},{\"id\":\"p3\",\"left\":\"Daya ($P$)\",\"right\":\"Watt ($\\\\text{J/s}$)\"},{\"id\":\"p4\",\"left\":\"Tekanan ($p$)\",\"right\":\"Pascal ($\\\\text{N/m}^2$)\"}]}",
+        "correct_answer": "{\"p1\":\"Newton ($\\\\text{kg}\\\\cdot\\\\text{m}/\\\\text{s}^2$)\",\"p2\":\"Joule ($\\\\text{kg}\\\\cdot\\\\text{m}^2/\\\\text{s}^2$)\",\"p3\":\"Watt ($\\\\text{J/s}$)\",\"p4\":\"Pascal ($\\\\text{N/m}^2$)\"}",
+        "explanation": "Gaya = Newton, Usaha = Joule, Daya = Watt, dan Tekanan = Pascal.",
+        "image_url": "",
+        "category": "Fisika",
+        "materi": "Besaran & Satuan SI",
+        "difficulty": "MUDAH",
+        "score": 20,
+        "created_by": "usr_prof_01",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_urut_biologi_01",
+        "question_type": "MENGURUTKAN",
+        "question_text": "<p>Urutkan tahapan proses mitosis sel eukariotik dari tahap paling awal hingga tahap akhir:</p>",
+        "options_json": "{\"ordering_items\":[{\"id\":\"ord_1\",\"text\":\"Profase (kondensasi kromatin menjadi kromosom)\"},{\"id\":\"ord_2\",\"text\":\"Metafase (kromosom berjajar di bidang ekuator)\"},{\"id\":\"ord_3\",\"text\":\"Anafase (kromatid saudara ditarik ke kutub berlawanan)\"},{\"id\":\"ord_4\",\"text\":\"Telofase (pembentukan kembali membran inti)\"}]}",
+        "correct_answer": "[\"ord_1\",\"ord_2\",\"ord_3\",\"ord_4\"]",
+        "explanation": "Urutan baku fase mitosis adalah Profase → Metafase → Anafase → Telofase (PMAT).",
+        "image_url": "",
+        "category": "Biologi",
+        "materi": "Pembelahan Sel",
+        "difficulty": "MUDAH",
+        "score": 15,
+        "created_by": "usr_prof_02",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_esai_metode_01",
+        "question_type": "ESAI",
+        "question_text": "<p>Seorang anggota KIR IPA ingin meneliti pengaruh konsentrasi pupuk cair organik terhadap laju pertumbuhan tinggi tanaman cabai rawit (<em>Capsicum frutescens</em>) selama 21 hari.</p><p>Rumuskanlah <strong>hipotesis penelitian</strong>, tentukan <strong>variabel bebas, variabel terikat, dan minimal 2 variabel kontrol</strong> untuk rancangan eksperimen tersebut!</p>",
+        "options_json": "{\"essay_max_chars\":1500,\"essay_rubric\":[{\"criterion\":\"Ketepatan Hipotesis Ilmiah\",\"max_points\":8,\"description\":\"Menyatakan hubungan kausal terukur antara konsentrasi pupuk dan laju pertumbuhan.\"},{\"criterion\":\"Identifikasi Variabel Bebas & Terikat\",\"max_points\":6,\"description\":\"Variabel bebas = konsentrasi pupuk; variabel terikat = laju/pertambahan tinggi tanaman.\"},{\"criterion\":\"Kelengkapan Variabel Kontrol\",\"max_points\":6,\"description\":\"Minimal 2 kontrol valid (intensitas cahaya, volume penyiraman, jenis media tanam, usia bibit).\"}]}",
+        "correct_answer": "Rubrik penilaian esai metode ilmiah (skor maks 20).",
+        "explanation": "Eksperimen terkontrol harus mengisolasi satu variabel bebas dan menjaga faktor lingkungan tetap seragam.",
+        "image_url": "",
+        "category": "Metode Ilmiah & Matematika",
+        "materi": "Desain Penelitian Ilmiah",
+        "difficulty": "SEDANG",
+        "score": 20,
+        "created_by": "usr_prof_01",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_pg_fisika_02",
+        "question_type": "PG",
+        "question_text": "<p>Dalam percobaan efek fotolistrik, frekuensi ambang logam natrium adalah $f_0 = 5{,}5 \\times 10^{14}\\text{ Hz}$. Jika logam disinari cahaya dengan frekuensi $f = 7{,}5 \\times 10^{14}\\text{ Hz}$ ($h = 6{,}63 \\times 10^{-34}\\text{ J}\\cdot\\text{s}$), energi kinetik maksimum fotoelektron yang terpancar adalah:</p>",
+        "options_json": "{\"choices\":[{\"id\":\"A\",\"label\":\"A\",\"text\":\"$1{,}326 \\\\times 10^{-19}\\\\text{ J}$\"},{\"id\":\"B\",\"label\":\"B\",\"text\":\"$2{,}652 \\\\times 10^{-19}\\\\text{ J}$\"},{\"id\":\"C\",\"label\":\"C\",\"text\":\"$3{,}646 \\\\times 10^{-19}\\\\text{ J}$\"},{\"id\":\"D\",\"label\":\"D\",\"text\":\"$4{,}972 \\\\times 10^{-19}\\\\text{ J}$\"},{\"id\":\"E\",\"label\":\"E\",\"text\":\"$6{,}630 \\\\times 10^{-19}\\\\text{ J}$\"}]}",
+        "correct_answer": "A",
+        "explanation": "$E_{k,\\max} = h(f - f_0) = 6{,}63 \\times 10^{-34}(7{,}5 - 5{,}5) \\times 10^{14} = 1{,}326 \\times 10^{-19}\\text{ J}$.",
+        "image_url": "",
+        "category": "Fisika",
+        "materi": "Fisika Kuantum",
+        "difficulty": "OLIMPIADE",
+        "score": 10,
+        "created_by": "usr_prof_01",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "question_id": "q_b9653a6aac2c",
+        "question_type": "BENAR_SALAH",
+        "question_text": "SOAL UJI PERSISTENSI LINTAS PERANGKAT 2026",
+        "options_json": "{}",
+        "correct_answer": "BENAR",
+        "explanation": "",
+        "image_url": "",
+        "category": "Biologi",
+        "materi": "",
+        "difficulty": "SEDANG",
+        "score": 10,
+        "created_by": "usr_admin_01",
+        "created_at": "2026-11-28T11:35:25.746Z"
+      }
+    ],
+    "EXAM_QUESTIONS": [
+      {
+        "id": "eq_2c3b2e3773c4",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_pg_fisika_01",
+        "question_order": 1,
+        "score": 10
+      },
+      {
+        "id": "eq_64908658a1e2",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_pgk_kimia_01",
+        "question_order": 2,
+        "score": 15
+      },
+      {
+        "id": "eq_fc2f4093e4cb",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_bs_biologi_01",
+        "question_order": 3,
+        "score": 10
+      },
+      {
+        "id": "eq_fc19b0ae3d48",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_isian_kimia_01",
+        "question_order": 4,
+        "score": 10
+      },
+      {
+        "id": "eq_2e0241a2a2c3",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_jodoh_fisika_01",
+        "question_order": 5,
+        "score": 20
+      },
+      {
+        "id": "eq_7cd07eb57ecc",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_urut_biologi_01",
+        "question_order": 6,
+        "score": 15
+      },
+      {
+        "id": "eq_49378b6bb823",
+        "exam_id": "exm_osn_2026",
+        "question_id": "q_esai_metode_01",
+        "question_order": 7,
+        "score": 20
+      },
+      {
+        "id": "eq_63d04dfa1e1f",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_pg_fisika_01",
+        "question_order": 1,
+        "score": 20
+      },
+      {
+        "id": "eq_b66ac959f3db",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_pg_fisika_02",
+        "question_order": 2,
+        "score": 20
+      },
+      {
+        "id": "eq_c6cb103345b5",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_bs_biologi_01",
+        "question_order": 3,
+        "score": 20
+      },
+      {
+        "id": "eq_ee7d1fe9ac9f",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_isian_kimia_01",
+        "question_order": 4,
+        "score": 20
+      },
+      {
+        "id": "eq_ea2f7ad97c80",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "question_order": 5,
+        "score": 20
+      }
+    ],
+    "EXAM_PARTICIPANTS": [
+      {
+        "id": "prt_0c27d7bc8e4e",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "status": "MENGERJAKAN",
+        "started_at": "2026-11-20T23:27:20.694Z",
+        "submitted_at": "",
+        "score": 0,
+        "session_id": "ses_2a419c4cd179"
+      },
+      {
+        "id": "prt_f164cd58226d",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-20T23:33:00.917Z",
+        "submitted_at": "2026-11-20T23:33:04.011Z",
+        "score": 25,
+        "session_id": "ses_de5000e20f05"
+      },
+      {
+        "id": "prt_d3c6925abbed",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_03",
+        "status": "BELUM_MULAI",
+        "started_at": "",
+        "submitted_at": "",
+        "score": 0,
+        "session_id": ""
+      },
+      {
+        "id": "prt_aac79d91fcbe",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_04",
+        "status": "BELUM_MULAI",
+        "started_at": "",
+        "submitted_at": "",
+        "score": 0,
+        "session_id": ""
+      },
+      {
+        "id": "prt_cc6f2c84aa86",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_05",
+        "status": "BELUM_MULAI",
+        "started_at": "",
+        "submitted_at": "",
+        "score": 0,
+        "session_id": ""
+      },
+      {
+        "id": "prt_d70645dd6e18",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_06",
+        "status": "BELUM_MULAI",
+        "started_at": "",
+        "submitted_at": "",
+        "score": 0,
+        "session_id": ""
+      },
+      {
+        "id": "prt_a692c3c90b62",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_07",
+        "status": "BELUM_MULAI",
+        "started_at": "",
+        "submitted_at": "",
+        "score": 0,
+        "session_id": ""
+      },
+      {
+        "id": "prt_701f7dbb1104",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-14T23:26:43.564Z",
+        "submitted_at": "2026-11-14T23:54:43.564Z",
+        "score": 99,
+        "session_id": ""
+      },
+      {
+        "id": "prt_06c0701dd5f6",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-14T23:26:43.564Z",
+        "submitted_at": "2026-11-14T23:57:43.564Z",
+        "score": 97,
+        "session_id": ""
+      },
+      {
+        "id": "prt_a6df21744925",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-14T23:26:43.564Z",
+        "submitted_at": "2026-11-15T00:00:43.564Z",
+        "score": 78,
+        "session_id": ""
+      },
+      {
+        "id": "prt_04058b5e5419",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-14T23:26:43.564Z",
+        "submitted_at": "2026-11-15T00:05:43.564Z",
+        "score": 55,
+        "session_id": ""
+      },
+      {
+        "id": "prt_137a9bc8eefb",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-14T23:26:43.564Z",
+        "submitted_at": "2026-11-15T00:07:43.564Z",
+        "score": 34,
+        "session_id": ""
+      },
+      {
+        "id": "prt_0c0dd2588347",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "status": "TERKUMPUL",
+        "started_at": "2026-11-14T23:26:43.564Z",
+        "submitted_at": "2026-11-15T00:09:43.564Z",
+        "score": 18,
+        "session_id": ""
+      }
+    ],
+    "ANSWERS": [
+      {
+        "answer_id": "ans_aa1b67f386c4",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"B\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:54:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_4f55fd918848",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_pg_fisika_02",
+        "answer_json": "\"A\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:54:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_92aa1095f8a2",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_bs_biologi_01",
+        "answer_json": "\"SALAH\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:54:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_4699791e5797",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_isian_kimia_01",
+        "answer_json": "\"2\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:54:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_a96881d189de",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_esai_metode_01",
+        "answer_json": "\"Hipotesis: Pemberian pupuk organik cair berpengaruh signifikan terhadap tinggi tanaman cabai. Variabel bebas: konsentrasi pupuk; variabel terikat: tinggi tanaman; variabel kontrol: intensitas cahaya dan volume penyiraman.\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:54:43.564Z",
+        "score": 19
+      },
+      {
+        "answer_id": "ans_422f2609d181",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"B\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:57:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_7df61ce75e60",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_pg_fisika_02",
+        "answer_json": "\"A\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:57:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_5addbdd29060",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_bs_biologi_01",
+        "answer_json": "\"SALAH\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:57:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_ee62a7b7d7e2",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_isian_kimia_01",
+        "answer_json": "\"2\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:57:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_fabea07fa19f",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_esai_metode_01",
+        "answer_json": "\"Hipotesis: Pemberian pupuk organik cair berpengaruh signifikan terhadap tinggi tanaman cabai. Variabel bebas: konsentrasi pupuk; variabel terikat: tinggi tanaman; variabel kontrol: intensitas cahaya dan volume penyiraman.\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-14T23:57:43.564Z",
+        "score": 17
+      },
+      {
+        "answer_id": "ans_3d4b9f1518d4",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"B\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:00:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_cc70e3b5d6d3",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "question_id": "q_pg_fisika_02",
+        "answer_json": "\"B\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:00:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_0a811064ecb5",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "question_id": "q_bs_biologi_01",
+        "answer_json": "\"SALAH\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:00:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_e7ce7ad9823d",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "question_id": "q_isian_kimia_01",
+        "answer_json": "\"2\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:00:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_47fb2b5cf7c9",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "question_id": "q_esai_metode_01",
+        "answer_json": "\"Hipotesis: Pemberian pupuk organik cair berpengaruh signifikan terhadap tinggi tanaman cabai. Variabel bebas: konsentrasi pupuk; variabel terikat: tinggi tanaman; variabel kontrol: intensitas cahaya dan volume penyiraman.\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:00:43.564Z",
+        "score": 18
+      },
+      {
+        "answer_id": "ans_f26da85a3618",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"C\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:05:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_5847af5163b7",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "question_id": "q_pg_fisika_02",
+        "answer_json": "\"A\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:05:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_48e1479bf417",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "question_id": "q_bs_biologi_01",
+        "answer_json": "\"BENAR\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:05:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_f064c3f2a60d",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "question_id": "q_isian_kimia_01",
+        "answer_json": "\"2\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:05:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_6822c902ac04",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "question_id": "q_esai_metode_01",
+        "answer_json": "\"Hipotesis: Pemberian pupuk organik cair berpengaruh signifikan terhadap tinggi tanaman cabai. Variabel bebas: konsentrasi pupuk; variabel terikat: tinggi tanaman; variabel kontrol: intensitas cahaya dan volume penyiraman.\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:05:43.564Z",
+        "score": 15
+      },
+      {
+        "answer_id": "ans_a6476aaee4fb",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"B\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:07:43.564Z",
+        "score": 20
+      },
+      {
+        "answer_id": "ans_fb9fb127ab1b",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "question_id": "q_pg_fisika_02",
+        "answer_json": "\"C\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:07:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_702445ef604b",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "question_id": "q_bs_biologi_01",
+        "answer_json": "\"BENAR\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:07:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_bc76cd99efe7",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "question_id": "q_isian_kimia_01",
+        "answer_json": "\"3\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:07:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_39bf62d285a1",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "question_id": "q_esai_metode_01",
+        "answer_json": "\"Hipotesis: Pemberian pupuk organik cair berpengaruh signifikan terhadap tinggi tanaman cabai. Variabel bebas: konsentrasi pupuk; variabel terikat: tinggi tanaman; variabel kontrol: intensitas cahaya dan volume penyiraman.\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:07:43.564Z",
+        "score": 14
+      },
+      {
+        "answer_id": "ans_9d31b3fbe8aa",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"A\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:09:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_65ffa442c91c",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "question_id": "q_pg_fisika_02",
+        "answer_json": "\"D\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:09:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_ae23796616d3",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "question_id": "q_bs_biologi_01",
+        "answer_json": "\"BENAR\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:09:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_6c7487c9228a",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "question_id": "q_isian_kimia_01",
+        "answer_json": "\"1\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:09:43.564Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_a039ed2841bf",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "question_id": "q_esai_metode_01",
+        "answer_json": "\"Hipotesis: Pemberian pupuk organik cair berpengaruh signifikan terhadap tinggi tanaman cabai. Variabel bebas: konsentrasi pupuk; variabel terikat: tinggi tanaman; variabel kontrol: intensitas cahaya dan volume penyiraman.\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-15T00:09:43.564Z",
+        "score": 18
+      },
+      {
+        "answer_id": "ans_360ebf44ff6b",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"B\"",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-20T23:40:10.160Z",
+        "score": 0
+      },
+      {
+        "answer_id": "ans_43451d560f93",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_pg_fisika_01",
+        "answer_json": "\"B\"",
+        "is_doubtful": 1,
+        "saved_at": "2026-11-20T23:33:02.511Z",
+        "score": 10
+      },
+      {
+        "answer_id": "ans_08c8645a69e8",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "question_id": "q_urut_biologi_01",
+        "answer_json": "[\"ord_1\",\"ord_2\",\"ord_3\",\"ord_4\"]",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-20T23:33:02.986Z",
+        "score": 15
+      },
+      {
+        "answer_id": "ans_2cb7fef1188a",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "question_id": "q_pgk_kimia_01",
+        "answer_json": "[\"B\"]",
+        "is_doubtful": 0,
+        "saved_at": "2026-11-20T23:40:17.599Z",
+        "score": 0
+      }
+    ],
+    "VIOLATION_LOGS": [
+      {
+        "log_id": "vio_d9520dc19125",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "event_type": "TAB_SWITCH",
+        "event_time": "2026-11-14T23:44:43.564Z",
+        "description": "Peserta berpindah tab/jendela selama 4 detik (tercatat otomatis)."
+      },
+      {
+        "log_id": "vio_8411604ed767",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "MULTI_SESSION",
+        "event_time": "2026-11-20T23:28:12.584Z",
+        "description": "Terdeteksi upaya membuka ujian dari sesi login berbeda."
+      },
+      {
+        "log_id": "vio_016334a95926",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "MULTI_SESSION",
+        "event_time": "2026-11-20T23:28:37.593Z",
+        "description": "Terdeteksi upaya membuka ujian dari sesi login berbeda."
+      },
+      {
+        "log_id": "vio_1ca6346367f7",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "MULTI_SESSION",
+        "event_time": "2026-11-20T23:29:00.043Z",
+        "description": "Terdeteksi upaya membuka ujian dari sesi login berbeda."
+      },
+      {
+        "log_id": "vio_3417e93befc4",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "MULTI_SESSION",
+        "event_time": "2026-11-20T23:29:18.140Z",
+        "description": "Terdeteksi upaya membuka ujian dari sesi login berbeda."
+      },
+      {
+        "log_id": "vio_497c2de77dd9",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "TAB_SWITCH",
+        "event_time": "2026-11-20T23:29:19.656Z",
+        "description": "Peserta meninggalkan jendela ujian (visibility)."
+      },
+      {
+        "log_id": "vio_afd53d2b934d",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "event_type": "TAB_SWITCH",
+        "event_time": "2026-11-20T23:33:01.594Z",
+        "description": "Peserta meninggalkan jendela ujian (visibility)."
+      },
+      {
+        "log_id": "vio_c414f5d89961",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "MULTI_SESSION",
+        "event_time": "2026-11-20T23:39:44.399Z",
+        "description": "Terdeteksi upaya membuka ujian dari sesi login berbeda."
+      },
+      {
+        "log_id": "vio_51f2cd5a4fb0",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "TAB_SWITCH",
+        "event_time": "2026-11-20T23:40:28.405Z",
+        "description": "Peserta meninggalkan jendela ujian (blur)."
+      },
+      {
+        "log_id": "vio_7f6b4e480c0f",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "TAB_SWITCH",
+        "event_time": "2026-11-20T23:40:30.079Z",
+        "description": "Peserta meninggalkan jendela ujian (blur)."
+      },
+      {
+        "log_id": "vio_654e04ddf94c",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "FULLSCREEN_EXIT",
+        "event_time": "2026-11-20T23:40:30.398Z",
+        "description": "Peserta keluar dari mode layar penuh."
+      }
+    ],
+    "RESULTS": [
+      {
+        "result_id": "res_c608c2be732e",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_01",
+        "correct_count": 5,
+        "incorrect_count": 0,
+        "unanswered_count": 0,
+        "total_score": 99,
+        "published": 1,
+        "graded_at": "2026-11-14T23:54:43.564Z"
+      },
+      {
+        "result_id": "res_9c6160096165",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_02",
+        "correct_count": 5,
+        "incorrect_count": 0,
+        "unanswered_count": 0,
+        "total_score": 97,
+        "published": 1,
+        "graded_at": "2026-11-14T23:57:43.564Z"
+      },
+      {
+        "result_id": "res_6b79c27d4929",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_03",
+        "correct_count": 4,
+        "incorrect_count": 1,
+        "unanswered_count": 0,
+        "total_score": 78,
+        "published": 1,
+        "graded_at": "2026-11-15T00:00:43.564Z"
+      },
+      {
+        "result_id": "res_8fb6e6aeb87e",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_04",
+        "correct_count": 3,
+        "incorrect_count": 2,
+        "unanswered_count": 0,
+        "total_score": 55,
+        "published": 1,
+        "graded_at": "2026-11-15T00:05:43.564Z"
+      },
+      {
+        "result_id": "res_a3afc0f5a982",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_05",
+        "correct_count": 2,
+        "incorrect_count": 3,
+        "unanswered_count": 0,
+        "total_score": 34,
+        "published": 1,
+        "graded_at": "2026-11-15T00:07:43.564Z"
+      },
+      {
+        "result_id": "res_9b49c3f0fe61",
+        "exam_id": "exm_tryout_01",
+        "user_id": "usr_siswa_06",
+        "correct_count": 1,
+        "incorrect_count": 4,
+        "unanswered_count": 0,
+        "total_score": 18,
+        "published": 1,
+        "graded_at": "2026-11-20T23:32:57.482Z"
+      },
+      {
+        "result_id": "res_7abcd1110380",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "correct_count": 2,
+        "incorrect_count": 0,
+        "unanswered_count": 5,
+        "total_score": 25,
+        "published": 0,
+        "graded_at": "2026-11-20T23:33:04.011Z"
+      }
+    ],
+    "SETTINGS": [
+      {
+        "setting_key": "app_name",
+        "setting_value": "CBT KIR IPA TEST PERSISTENT"
+      },
+      {
+        "setting_key": "org_name",
+        "setting_value": "Kelompok Ilmiah Remaja (KIR) IPA"
+      },
+      {
+        "setting_key": "school_name",
+        "setting_value": "SMA Negeri 1 Sukabumi"
+      },
+      {
+        "setting_key": "academic_year",
+        "setting_value": "2026 / 2027"
+      },
+      {
+        "setting_key": "management_period",
+        "setting_value": "Periode 2026–2027"
+      },
+      {
+        "setting_key": "logo_url",
+        "setting_value": "/api/assets/logo_ast_474fafd016a2_1795865646531.png"
+      },
+      {
+        "setting_key": "primary_color",
+        "setting_value": "#0F294A"
+      },
+      {
+        "setting_key": "accent_color",
+        "setting_value": "#D97706"
+      },
+      {
+        "setting_key": "contact_info",
+        "setting_value": "Jl. RH. Didi Sukardi No. 124, Sukabumi · kiripa@sman1sukabumi.sch.id"
+      },
+      {
+        "setting_key": "announcement",
+        "setting_value": "Selamat datang di Portal Ujian Digital Resmi KIR IPA SMAN 1 Sukabumi. Pastikan koneksi stabil dan gunakan mode layar penuh saat ujian seleksi OSN berlangsung."
+      },
+      {
+        "setting_key": "report_footer",
+        "setting_value": "Dokumen Resmi Panitia Evaluasi Akademik KIR IPA SMA Negeri 1 Sukabumi"
+      },
+      {
+        "setting_key": "max_login_attempts",
+        "setting_value": "5"
+      },
+      {
+        "setting_key": "lockout_minutes",
+        "setting_value": "5"
+      },
+      {
+        "setting_key": "session_hours",
+        "setting_value": "8"
+      },
+      {
+        "setting_key": "professor_global_access",
+        "setting_value": "false"
+      }
+    ],
+    "AUDIT_LOGS": [
+      {
+        "log_id": "aud_752b70157e09",
+        "user_id": "usr_admin_01",
+        "activity": "SYSTEM_INITIALIZE",
+        "timestamp": "2026-11-20T23:26:43.568Z",
+        "details": "{\"message\":\"Inisialisasi awal database CBT KIR IPA SMAN 1 Sukabumi\"}"
+      },
+      {
+        "log_id": "aud_83f182d8b7f8",
+        "user_id": "usr_prof_01",
+        "activity": "EXAM_ACTIVATE",
+        "timestamp": "2026-11-20T23:26:43.568Z",
+        "details": "{\"exam_id\":\"exm_osn_2026\",\"title\":\"Seleksi Internal OSN & Riset KIR IPA 2026\"}"
+      },
+      {
+        "log_id": "aud_c0d020e8f4d5",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:27:17.566Z",
+        "details": "{\"username\":\"admin.kir\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_0fadc72c2724",
+        "user_id": "usr_admin_01",
+        "activity": "LOGOUT",
+        "timestamp": "2026-11-20T23:27:20.340Z",
+        "details": "{\"session_id\":\"ses_dc0d6640df6f\"}"
+      },
+      {
+        "log_id": "aud_aaee2f06a8bf",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:27:20.570Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_d05974ad5840",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:28:11.933Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_010d7939f1af",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:28:37.485Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_2e78444ac1e6",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:28:59.943Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_d144cae60c98",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:29:18.038Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_4cc6ce95df96",
+        "user_id": "usr_prof_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:31:56.256Z",
+        "details": "{\"username\":\"prof.fisika\",\"role\":\"PROFESSOR\"}"
+      },
+      {
+        "log_id": "aud_b06882a7c805",
+        "user_id": "usr_prof_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:32:56.616Z",
+        "details": "{\"username\":\"prof.fisika\",\"role\":\"PROFESSOR\"}"
+      },
+      {
+        "log_id": "aud_ab55716052ab",
+        "user_id": "usr_prof_01",
+        "activity": "ESSAY_GRADED",
+        "timestamp": "2026-11-20T23:32:57.483Z",
+        "details": "{\"exam_id\":\"exm_tryout_01\",\"question_id\":\"q_esai_metode_01\",\"student_id\":\"usr_siswa_06\",\"score\":18}"
+      },
+      {
+        "log_id": "aud_ade9903a8ee5",
+        "user_id": "usr_prof_01",
+        "activity": "LOGOUT",
+        "timestamp": "2026-11-20T23:32:59.693Z",
+        "details": "{\"session_id\":\"ses_4cc5e47d3b4e\"}"
+      },
+      {
+        "log_id": "aud_320819644582",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:32:59.824Z",
+        "details": "{\"username\":\"admin.kir\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_38fe5fed743c",
+        "user_id": "usr_admin_01",
+        "activity": "LOGOUT",
+        "timestamp": "2026-11-20T23:33:00.694Z",
+        "details": "{\"session_id\":\"ses_c0e654c1a741\"}"
+      },
+      {
+        "log_id": "aud_fc8c2349c955",
+        "user_id": "usr_siswa_02",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:33:00.820Z",
+        "details": "{\"username\":\"siswa02\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_2bea8d30d769",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:39:27.992Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_a87ee72a344e",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:40:46.116Z",
+        "details": "{\"username\":\"admin.kir\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_885c99c6739e",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-20T23:44:20.915Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_8a02055610e6",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-21T23:49:53.206Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_52c753746cf4",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-21T23:55:23.999Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_cd4059b0ff95",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:42:59.715Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_6b04705f228a",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:42:59.794Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_0ec42d179551",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATE_CREATE",
+        "timestamp": "2026-11-22T02:42:59.867Z",
+        "details": "{\"template_id\":\"tpl_ef66a9ca0f34\",\"name\":\"Template Uji API Temp\",\"doc_category\":\"LAPORAN_HASIL\"}"
+      },
+      {
+        "log_id": "aud_2c83e68d75b0",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:43:21.359Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_6db0f809314f",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:43:21.414Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_a12da030f8ee",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATE_CREATE",
+        "timestamp": "2026-11-22T02:43:21.462Z",
+        "details": "{\"template_id\":\"tpl_3568351fc99e\",\"name\":\"Template Uji API Temp\",\"doc_category\":\"LAPORAN_HASIL\"}"
+      },
+      {
+        "log_id": "aud_cfef68cdd8e8",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATE_UPDATE",
+        "timestamp": "2026-11-22T02:43:21.466Z",
+        "details": "{\"template_id\":\"tpl_3568351fc99e\",\"name\":\"Template Uji API Updated\"}"
+      },
+      {
+        "log_id": "aud_2c0933dbcb5e",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATE_DUPLICATE",
+        "timestamp": "2026-11-22T02:43:21.469Z",
+        "details": "{\"source\":\"tpl_3568351fc99e\",\"target\":\"tpl_f15224bca364\"}"
+      },
+      {
+        "log_id": "aud_29a5acc9f014",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATE_DELETE",
+        "timestamp": "2026-11-22T02:43:21.473Z",
+        "details": "{\"template_id\":\"tpl_f15224bca364\"}"
+      },
+      {
+        "log_id": "aud_a63582c9b0a5",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATE_DELETE",
+        "timestamp": "2026-11-22T02:43:21.476Z",
+        "details": "{\"template_id\":\"tpl_3568351fc99e\"}"
+      },
+      {
+        "log_id": "aud_a57b54163fe4",
+        "user_id": "usr_admin_01",
+        "activity": "REPORT_TEMPLATES_RESTORE_DEFAULT",
+        "timestamp": "2026-11-22T02:43:21.480Z",
+        "details": "{}"
+      },
+      {
+        "log_id": "aud_15a697c11952",
+        "user_id": "usr_admin_01",
+        "activity": "OFFICIAL_DOCUMENT_SAVE",
+        "timestamp": "2026-11-22T02:43:21.484Z",
+        "details": "{\"doc_id\":\"doc_b5c88e572de4\",\"doc_category\":\"BERITA_ACARA\",\"status\":\"DRAFT\",\"title\":\"Berita Acara Uji API Temp\"}"
+      },
+      {
+        "log_id": "aud_26e05e879377",
+        "user_id": "usr_admin_01",
+        "activity": "OFFICIAL_DOCUMENT_UPDATE",
+        "timestamp": "2026-11-22T02:43:21.489Z",
+        "details": "{\"doc_id\":\"doc_b5c88e572de4\",\"status\":\"PUBLISHED\"}"
+      },
+      {
+        "log_id": "aud_298c4bd1a1eb",
+        "user_id": "usr_admin_01",
+        "activity": "OFFICIAL_DOCUMENT_DUPLICATE",
+        "timestamp": "2026-11-22T02:43:21.493Z",
+        "details": "{\"source\":\"doc_b5c88e572de4\",\"target\":\"doc_5630fe67b9f2\"}"
+      },
+      {
+        "log_id": "aud_9fb1b166e902",
+        "user_id": "usr_admin_01",
+        "activity": "OFFICIAL_DOCUMENT_DELETE",
+        "timestamp": "2026-11-22T02:43:21.496Z",
+        "details": "{\"doc_id\":\"doc_5630fe67b9f2\"}"
+      },
+      {
+        "log_id": "aud_1ab56aa93b6a",
+        "user_id": "usr_admin_01",
+        "activity": "OFFICIAL_DOCUMENT_DELETE",
+        "timestamp": "2026-11-22T02:43:21.500Z",
+        "details": "{\"doc_id\":\"doc_b5c88e572de4\"}"
+      },
+      {
+        "log_id": "aud_ec1318a3d2c8",
+        "user_id": "usr_admin_01",
+        "activity": "USER_IMPORT",
+        "timestamp": "2026-11-22T02:43:21.552Z",
+        "details": "{\"imported\":1,\"skipped_duplicates\":1,\"failed_count\":1}"
+      },
+      {
+        "log_id": "aud_0f309e0aba24",
+        "user_id": "usr_admin_01",
+        "activity": "USER_DELETE",
+        "timestamp": "2026-11-22T02:43:21.559Z",
+        "details": "{\"target_user_id\":\"usr_cc8e4a109f71\",\"username\":\"tmp_test_api_u1\"}"
+      },
+      {
+        "log_id": "aud_e51b9cfb8dd8",
+        "user_id": "usr_admin_01",
+        "activity": "QUESTION_IMPORT",
+        "timestamp": "2026-11-22T02:43:21.563Z",
+        "details": "{\"imported\":1,\"skipped_duplicates\":1,\"failed_count\":0}"
+      },
+      {
+        "log_id": "aud_fe568b3c4722",
+        "user_id": "usr_admin_01",
+        "activity": "QUESTION_DELETE",
+        "timestamp": "2026-11-22T02:43:21.570Z",
+        "details": "{\"question_id\":\"q_9109a6a242b4\"}"
+      },
+      {
+        "log_id": "aud_ba98eda4aa51",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:43:49.702Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_effa144eebce",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:44:31.369Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_381cb74198f5",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:45:02.133Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_3b9e542b2e32",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:45:35.875Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_449edb010676",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:46:50.096Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_5b0545b2a5bc",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-22T02:48:13.058Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_03a6951855bc",
+        "user_id": "system_migration",
+        "activity": "DATABASE_BACKUP",
+        "timestamp": "2026-11-28T11:32:28.101Z",
+        "details": "{\"backup_id\":\"bkp_ee5588e910d4\",\"backup_type\":\"AUTO_PRE_MIGRATION\",\"file\":\"backup_auto_pre_migration_bkp_ee5588e910d4_1795865548097.json\",\"size_bytes\":75693}"
+      },
+      {
+        "log_id": "aud_f87e1003b426",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:33:15.816Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_fc75a5dd39f5",
+        "user_id": "usr_admin_01",
+        "activity": "LOGO_FILE_UPLOAD",
+        "timestamp": "2026-11-28T11:34:06.532Z",
+        "details": "{\"asset_id\":\"ast_474fafd016a2\",\"filename\":\"logo_ast_474fafd016a2_1795865646531.png\",\"size_bytes\":70}"
+      },
+      {
+        "log_id": "aud_503accfae99e",
+        "user_id": "usr_admin_01",
+        "activity": "SETTINGS_UPDATE",
+        "timestamp": "2026-11-28T11:34:06.534Z",
+        "details": "{\"version\":2,\"keys\":[\"logo_url\"]}"
+      },
+      {
+        "log_id": "aud_97c274e25cca",
+        "user_id": "usr_admin_01",
+        "activity": "SETTINGS_UPDATE",
+        "timestamp": "2026-11-28T11:34:10.485Z",
+        "details": "{\"version\":3,\"keys\":[\"app_name\"]}"
+      },
+      {
+        "log_id": "aud_f703fca755b3",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:34:36.324Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_99f3c48bd2fa",
+        "user_id": "usr_admin_01",
+        "activity": "LOGOUT",
+        "timestamp": "2026-11-28T11:34:40.926Z",
+        "details": "{\"session_id\":\"ses_6ef15b03d215\"}"
+      },
+      {
+        "log_id": "aud_d034240e0120",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:34:56.961Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_9f2477f4dac1",
+        "user_id": "usr_admin_01",
+        "activity": "QUESTION_CREATE",
+        "timestamp": "2026-11-28T11:35:25.747Z",
+        "details": "{\"question_id\":\"q_b9653a6aac2c\",\"type\":\"BENAR_SALAH\"}"
+      },
+      {
+        "log_id": "aud_3309c2b53569",
+        "user_id": "usr_siswa_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:36:14.255Z",
+        "details": "{\"username\":\"siswa01\",\"role\":\"SISWA\"}"
+      },
+      {
+        "log_id": "aud_a658402780aa",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:36:14.355Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_01c5f36f4a81",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:36:38.410Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      },
+      {
+        "log_id": "aud_4d05d98f8a82",
+        "user_id": "usr_admin_01",
+        "activity": "LOGIN",
+        "timestamp": "2026-11-28T11:36:40.463Z",
+        "details": "{\"username\":\"aetherium22\",\"role\":\"SUPER_ADMIN\"}"
+      }
+    ],
+    "EXAM_LOGS": [
+      {
+        "log_id": "exl_169eb21ac6cc",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "EXAM_START",
+        "timestamp": "2026-11-20T23:27:20.694Z",
+        "details": "Peserta memulai ujian."
+      },
+      {
+        "log_id": "exl_92a979a52728",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "SESSION_RECOVER",
+        "timestamp": "2026-11-20T23:29:18.202Z",
+        "details": "Peserta memulihkan sesi ujian."
+      },
+      {
+        "log_id": "exl_0b6d0037d7d5",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "event_type": "EXAM_START",
+        "timestamp": "2026-11-20T23:33:00.917Z",
+        "details": "Peserta memulai ujian."
+      },
+      {
+        "log_id": "exl_3cc17ceda187",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_02",
+        "event_type": "MANUAL_SUBMIT",
+        "timestamp": "2026-11-20T23:33:04.011Z",
+        "details": "Total skor objektif: 25"
+      },
+      {
+        "log_id": "exl_abc004e9a125",
+        "exam_id": "exm_osn_2026",
+        "user_id": "usr_siswa_01",
+        "event_type": "SESSION_RECOVER",
+        "timestamp": "2026-11-20T23:39:53.047Z",
+        "details": "Peserta memulihkan sesi ujian."
+      }
+    ],
+    "ESSAY_GRADES": [
+      {
+        "grade_id": "eg_f052be8ec7c5",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "user_id": "usr_siswa_01",
+        "score": 19,
+        "feedback": "Rumusan hipotesis dan identifikasi variabel eksperimen sudah sistematis.",
+        "graded_by": "usr_prof_01",
+        "graded_at": "2026-11-14T23:54:43.564Z"
+      },
+      {
+        "grade_id": "eg_4ef99fa21e9f",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "user_id": "usr_siswa_02",
+        "score": 17,
+        "feedback": "Rumusan hipotesis dan identifikasi variabel eksperimen sudah sistematis.",
+        "graded_by": "usr_prof_01",
+        "graded_at": "2026-11-14T23:57:43.564Z"
+      },
+      {
+        "grade_id": "eg_01ba7da56f71",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "user_id": "usr_siswa_03",
+        "score": 18,
+        "feedback": "Rumusan hipotesis dan identifikasi variabel eksperimen sudah sistematis.",
+        "graded_by": "usr_prof_01",
+        "graded_at": "2026-11-15T00:00:43.564Z"
+      },
+      {
+        "grade_id": "eg_2e37e76d5341",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "user_id": "usr_siswa_04",
+        "score": 15,
+        "feedback": "Rumusan hipotesis dan identifikasi variabel eksperimen sudah sistematis.",
+        "graded_by": "usr_prof_01",
+        "graded_at": "2026-11-15T00:05:43.564Z"
+      },
+      {
+        "grade_id": "eg_94e61aff13d9",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "user_id": "usr_siswa_05",
+        "score": 14,
+        "feedback": "Rumusan hipotesis dan identifikasi variabel eksperimen sudah sistematis.",
+        "graded_by": "usr_prof_01",
+        "graded_at": "2026-11-15T00:07:43.564Z"
+      },
+      {
+        "grade_id": "eg_0a52737d2902",
+        "exam_id": "exm_tryout_01",
+        "question_id": "q_esai_metode_01",
+        "user_id": "usr_siswa_06",
+        "score": 18,
+        "feedback": "",
+        "graded_by": "usr_prof_01",
+        "graded_at": "2026-11-20T23:32:57.481Z"
+      }
+    ],
+    "EXAM_CATEGORIES": [
+      {
+        "category_id": "cat_fisika",
+        "category_name": "Fisika",
+        "description": "Mekanika, Termodinamika, Elektromagnetik, Optik & Fisika Modern",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "category_id": "cat_kimia",
+        "category_name": "Kimia",
+        "description": "Stoikiometri, Termokimia, Kesetimbangan, Kimia Organik & Larutan",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "category_id": "cat_biologi",
+        "category_name": "Biologi",
+        "description": "Biologi Sel, Genetika Molekuler, Fisiologi & Ekologi",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      },
+      {
+        "category_id": "cat_metode",
+        "category_name": "Metode Ilmiah & Matematika",
+        "description": "Rancangan Eksperimen, Statistika Riset & Penalaran Kuantitatif",
+        "created_at": "2026-11-20T23:26:43.178Z"
+      }
+    ],
+    "NOTIFICATIONS": [
+      {
+        "notification_id": "ntf_b7f0ca09efc8",
+        "user_id": "usr_siswa_01",
+        "title": "Ujian Seleksi OSN Dibuka",
+        "message": "Ujian \"Seleksi Internal OSN & Riset KIR IPA 2026\" telah aktif. Silakan mulai sesuai jadwal.",
+        "created_at": "2026-11-20T23:26:43.568Z",
+        "is_read": 1
+      },
+      {
+        "notification_id": "ntf_b3dc787297e6",
+        "user_id": "usr_prof_01",
+        "title": "1 Jawaban Esai Menunggu Penilaian",
+        "message": "Terdapat jawaban esai pada Tryout Dasar Olimpiade Sains Tahap 1 yang belum dinilai.",
+        "created_at": "2026-11-20T23:26:43.568Z",
+        "is_read": 0
+      }
+    ],
+    "REPORT_TEMPLATES": [
+      {
+        "template_id": "tpl_default_laporan",
+        "name": "Template Standar Laporan Hasil Ujian",
+        "doc_category": "LAPORAN_HASIL",
+        "exam_id": "",
+        "is_default": 1,
+        "content_json": "{\"typography\":{\"fontFamily\":\"sans\",\"fontSizePx\":11,\"lineHeight\":1.5,\"headerAlign\":\"center\",\"bodyAlign\":\"left\"},\"page\":{\"paperSize\":\"A4\",\"orientation\":\"portrait\",\"marginMm\":15},\"letterhead\":{\"showLogo\":true,\"logoUrl\":\"/src/assets/images/kir_ipa_logo_1795216569338.jpg\",\"orgLine1\":\"PEMERINTAH DAERAH PROVINSI JAWA BARAT · DINAS PENDIDIKAN\",\"orgLine2\":\"KELOMPOK ILMIAH REMAJA (KIR) IPA\",\"institutionName\":\"SMA NEGERI 1 SUKABUMI\",\"addressLine\":\"Sekretariat KIR IPA SMA Negeri 1 Sukabumi\",\"contactLine\":\"Jl. RH. Didi Sukardi No. 124, Sukabumi · kiripa@sman1sukabumi.sch.id\",\"borderStyle\":\"double\"},\"meta\":{\"title\":\"LAPORAN HASIL PELAKSANAAN UJIAN DIGITAL\",\"subtitle\":\"{{nama_ujian}} · Bidang {{bidang_mapel}}\",\"docNumber\":\"LAP/KIR-IPA/2026/001\",\"subjectLine\":\"Laporan Evaluasi & Rekapitulasi Nilai Peserta\",\"activityName\":\"{{nama_kegiatan}}\",\"placeAndDate\":\"Sukabumi, {{tanggal_terbit}}\"},\"sections\":[{\"id\":\"sec_identitas\",\"kind\":\"info_grid\",\"title\":\"I. Identitas Pelaksanaan Ujian\",\"content\":\"\",\"visible\":true,\"infoRows\":[{\"label\":\"Nama Kegiatan / Ujian\",\"value\":\"{{nama_ujian}}\"},{\"label\":\"Bidang / Mata Pelajaran\",\"value\":\"{{bidang_mapel}}\"},{\"label\":\"Hari / Tanggal Pelaksanaan\",\"value\":\"{{hari_pelaksanaan}}, {{tanggal_pelaksanaan}}\"},{\"label\":\"Durasi & Tahun Ajaran\",\"value\":\"{{durasi_menit}} · T.A. {{tahun_ajaran}}\"},{\"label\":\"Penanggung Jawab\",\"value\":\"{{nama_penanggung_jawab}}\"}]},{\"id\":\"sec_stats\",\"kind\":\"stats_cards\",\"title\":\"II. Ringkasan Partisipasi & Statistik Nilai\",\"content\":\"{{ringkasan_hasil}}\",\"visible\":true},{\"id\":\"sec_narasi\",\"kind\":\"paragraph\",\"title\":\"III. Uraian Pelaksanaan\",\"content\":\"Pelaksanaan {{nama_ujian}} diikuti oleh {{peserta_hadir}} peserta dari total {{peserta_terdaftar}} peserta terdaftar ({{peserta_tidak_hadir}} tidak hadir). Sebanyak {{peserta_selesai}} peserta berhasil menyelesaikan ujian dengan nilai tertinggi {{nilai_tertinggi}}, nilai terendah {{nilai_terendah}}, dan rata-rata {{nilai_rata_rata}}.\",\"visible\":true,\"align\":\"justify\"},{\"id\":\"sec_tabel_hasil\",\"kind\":\"results_table\",\"title\":\"IV. Rekapitulasi Daftar Nilai & Peringkat Peserta\",\"content\":\"\",\"visible\":true,\"tableColumns\":[\"peringkat\",\"nama\",\"kelas\",\"benar_salah\",\"nilai_akhir\",\"persentase\",\"status_lulus\"]},{\"id\":\"sec_pelanggaran\",\"kind\":\"violations_table\",\"title\":\"V. Rekapitulasi Pengawasan & Integritas\",\"content\":\"{{keterangan_tambahan}}\",\"visible\":true},{\"id\":\"sec_catatan\",\"kind\":\"notes\",\"title\":\"VI. Catatan & Rekomendasi Tindak Lanjut\",\"content\":\"Peserta yang memenuhi kriteria batas kelulusan ({{passing_grade}}) berhak mengikuti pembinaan lanjutan maupun seleksi tahap berikutnya bersama tim pembina {{nama_instansi}}.\",\"visible\":true}],\"winnerRows\":[],\"signatories\":[{\"id\":\"sig_1\",\"roleLabel\":\"Ketua Pelaksana Kegiatan\",\"name\":\"Panitia Evaluasi KIR IPA\",\"titleOrNip\":\"Sekretariat {{nama_instansi}}\",\"align\":\"left\"},{\"id\":\"sig_2\",\"roleLabel\":\"Pembina / Penanggung Jawab\",\"name\":\"{{nama_penanggung_jawab}}\",\"titleOrNip\":\"{{nama_sekolah}}\",\"align\":\"right\"}],\"headerFooter\":{\"headerText\":\"{{nama_instansi}} · {{nama_sekolah}}\",\"footerText\":\"Dokumen Resmi Panitia Evaluasi Akademik KIR IPA SMA Negeri 1 Sukabumi\",\"showPageNumbers\":true},\"showStampArea\":false,\"tableHeaderBg\":\"#0F294A\"}",
+        "created_by": "usr_admin_01",
+        "created_at": "2026-11-22T02:42:42.228Z",
+        "updated_at": "2026-11-22T02:43:21.480Z"
+      },
+      {
+        "template_id": "tpl_default_berita_acara",
+        "name": "Template Resmi Berita Acara Pelaksanaan Ujian/Lomba",
+        "doc_category": "BERITA_ACARA",
+        "exam_id": "",
+        "is_default": 1,
+        "content_json": "{\"typography\":{\"fontFamily\":\"serif\",\"fontSizePx\":11,\"lineHeight\":1.55,\"headerAlign\":\"center\",\"bodyAlign\":\"justify\"},\"page\":{\"paperSize\":\"F4\",\"orientation\":\"portrait\",\"marginMm\":16},\"letterhead\":{\"showLogo\":true,\"logoUrl\":\"/src/assets/images/kir_ipa_logo_1795216569338.jpg\",\"orgLine1\":\"PEMERINTAH DAERAH PROVINSI JAWA BARAT · DINAS PENDIDIKAN\",\"orgLine2\":\"KELOMPOK ILMIAH REMAJA (KIR) IPA\",\"institutionName\":\"SMA NEGERI 1 SUKABUMI\",\"addressLine\":\"Sekretariat KIR IPA SMA Negeri 1 Sukabumi\",\"contactLine\":\"Jl. RH. Didi Sukardi No. 124, Sukabumi · kiripa@sman1sukabumi.sch.id\",\"borderStyle\":\"double\"},\"meta\":{\"title\":\"BERITA ACARA HASIL PELAKSANAAN UJIAN / LOMBA\",\"subtitle\":\"{{nama_ujian}}\",\"docNumber\":\"BA/014/KIR-IPA/SMAN1-SMI/2026\",\"subjectLine\":\"Berita Acara Resmi Penyelenggaraan & Penetapan Hasil\",\"activityName\":\"{{nama_kegiatan}}\",\"placeAndDate\":\"Sukabumi, {{tanggal_terbit}}\"},\"sections\":[{\"id\":\"ba_pembuka\",\"kind\":\"paragraph\",\"title\":\"I. Pernyataan Pelaksanaan\",\"content\":\"Pada hari ini, {{hari_pelaksanaan}} tanggal {{tanggal_pelaksanaan}}, bertempat di {{tempat_pelaksanaan}}, telah diselenggarakan kegiatan {{nama_ujian}} bidang {{bidang_mapel}} di bawah koordinasi {{nama_instansi}} {{nama_sekolah}} Tahun Ajaran {{tahun_ajaran}}.\",\"visible\":true,\"align\":\"justify\"},{\"id\":\"ba_identitas\",\"kind\":\"info_grid\",\"title\":\"II. Identitas Kegiatan, Panitia & Kehadiran\",\"content\":\"\",\"visible\":true,\"infoRows\":[{\"label\":\"Nama Kegiatan / Ujian\",\"value\":\"{{nama_ujian}}\"},{\"label\":\"Bidang / Lomba\",\"value\":\"{{bidang_mapel}}\"},{\"label\":\"Waktu & Tempat\",\"value\":\"{{waktu_mulai}} – {{waktu_selesai}} · {{tempat_pelaksanaan}}\"},{\"label\":\"Jumlah Peserta Terdaftar\",\"value\":\"{{peserta_terdaftar}} peserta\"},{\"label\":\"Peserta Mengikuti / Selesai\",\"value\":\"{{peserta_hadir}} hadir / {{peserta_selesai}} selesai ({{peserta_tidak_hadir}} tidak hadir)\"},{\"label\":\"Kendala & Pengawasan\",\"value\":\"{{gangguan_teknis}} gangguan teknis · {{total_pelanggaran}} log pelanggaran\"}]},{\"id\":\"ba_uraian\",\"kind\":\"paragraph\",\"title\":\"III. Uraian Singkat & Statistik Hasil\",\"content\":\"Berdasarkan rekapitulasi sistem penilaian CBT, diperoleh nilai tertinggi {{nilai_tertinggi}}, nilai terendah {{nilai_terendah}}, dan nilai rata-rata {{nilai_rata_rata}}. Peringkat pertama diraih oleh {{pemenang_utama}} dengan perolehan nilai {{nilai_akhir}}.\",\"visible\":true,\"align\":\"justify\"},{\"id\":\"ba_tabel_hasil\",\"kind\":\"winners_table\",\"title\":\"IV. Tabel Hasil Akhir / Daftar Peringkat Pemenang\",\"content\":\"\",\"visible\":true,\"tableColumns\":[\"peringkat\",\"nama\",\"kelas\",\"nilai_akhir\",\"persentase\",\"kategori_juara\"]},{\"id\":\"ba_keterangan\",\"kind\":\"notes\",\"title\":\"V. Keterangan Tambahan\",\"content\":\"{{keterangan_tambahan}}\",\"visible\":true},{\"id\":\"ba_penutup\",\"kind\":\"paragraph\",\"title\":\"VI. Penutup\",\"content\":\"Demikian Berita Acara Hasil Pelaksanaan Ujian/Lomba ini dibuat dengan sebenar-benarnya untuk dapat dipergunakan sebagaimana mestinya sebagai dokumen pertanggungjawaban akademik dan administratif resmi.\",\"visible\":true,\"align\":\"justify\"}],\"winnerRows\":[],\"signatories\":[{\"id\":\"ba_sig_ketua\",\"roleLabel\":\"Ketua Pelaksana,\",\"name\":\"{{nama_penanggung_jawab}}\",\"titleOrNip\":\"Pembina / Ketua Panitia\",\"align\":\"left\"},{\"id\":\"ba_sig_sekretaris\",\"roleLabel\":\"Sekretaris / Pengawas Ruang,\",\"name\":\"Sekretaris Panitia CBT\",\"titleOrNip\":\"{{nama_instansi}}\",\"align\":\"center\"},{\"id\":\"ba_sig_mengetahui\",\"roleLabel\":\"Mengetahui, Pihak Terkait / Pembina\",\"name\":\"Koordinator Kesiswaan / Pembina\",\"titleOrNip\":\"{{nama_sekolah}}\",\"align\":\"right\"}],\"headerFooter\":{\"headerText\":\"Berita Acara Resmi · {{nama_ujian}}\",\"footerText\":\"Dokumen Resmi Panitia Evaluasi Akademik KIR IPA SMA Negeri 1 Sukabumi\",\"showPageNumbers\":true},\"showStampArea\":true,\"tableHeaderBg\":\"#0F294A\"}",
+        "created_by": "usr_admin_01",
+        "created_at": "2026-11-22T02:42:42.228Z",
+        "updated_at": "2026-11-22T02:43:21.480Z"
+      },
+      {
+        "template_id": "tpl_default_pengumuman",
+        "name": "Template Surat Keputusan & Pengumuman Pemenang",
+        "doc_category": "PENGUMUMAN_PEMENANG",
+        "exam_id": "",
+        "is_default": 1,
+        "content_json": "{\"typography\":{\"fontFamily\":\"serif\",\"fontSizePx\":11,\"lineHeight\":1.55,\"headerAlign\":\"center\",\"bodyAlign\":\"justify\"},\"page\":{\"paperSize\":\"A4\",\"orientation\":\"portrait\",\"marginMm\":16},\"letterhead\":{\"showLogo\":true,\"logoUrl\":\"/src/assets/images/kir_ipa_logo_1795216569338.jpg\",\"orgLine1\":\"PEMERINTAH DAERAH PROVINSI JAWA BARAT · DINAS PENDIDIKAN\",\"orgLine2\":\"KELOMPOK ILMIAH REMAJA (KIR) IPA\",\"institutionName\":\"SMA NEGERI 1 SUKABUMI\",\"addressLine\":\"Sekretariat KIR IPA SMA Negeri 1 Sukabumi\",\"contactLine\":\"Jl. RH. Didi Sukardi No. 124, Sukabumi · kiripa@sman1sukabumi.sch.id\",\"borderStyle\":\"double\"},\"meta\":{\"title\":\"SURAT KEPUTUSAN & PENGUMUMAN RESMI PENETAPAN PEMENANG\",\"subtitle\":\"NOMOR: {{doc_number}}\",\"docNumber\":\"SK-PEM/021/KIR-IPA/2026\",\"subjectLine\":\"Penetapan Hasil Akhir dan Pemenang {{nama_ujian}}\",\"activityName\":\"{{nama_kegiatan}}\",\"placeAndDate\":\"Sukabumi, {{tanggal_terbit}}\"},\"sections\":[{\"id\":\"sk_perihal\",\"kind\":\"info_grid\",\"title\":\"Identitas Surat Resmi\",\"content\":\"\",\"visible\":true,\"infoRows\":[{\"label\":\"Nomor Surat\",\"value\":\"SK-PEM/021/KIR-IPA/2026\"},{\"label\":\"Perihal\",\"value\":\"Pengumuman Hasil Akhir & Penetapan Pemenang {{nama_ujian}}\"},{\"label\":\"Kegiatan / Bidang\",\"value\":\"{{nama_kegiatan}} ({{bidang_mapel}})\"},{\"label\":\"Tanggal Pelaksanaan\",\"value\":\"{{hari_pelaksanaan}}, {{tanggal_pelaksanaan}}\"},{\"label\":\"Total Peserta Evaluasi\",\"value\":\"{{peserta_selesai}} dari {{peserta_terdaftar}} peserta\"}]},{\"id\":\"sk_dasar\",\"kind\":\"paragraph\",\"title\":\"I. Dasar dan Pertimbangan Penetapan\",\"content\":\"Berdasarkan hasil verifikasi lembar jawaban digital, penilaian soal objektif dan esai, serta rekapitulasi catatan pengawasan ujian pada {{nama_ujian}} yang diselenggarakan oleh {{nama_instansi}} {{nama_sekolah}} pada tanggal {{tanggal_pelaksanaan}}, panitia dan tim dewan juri telah menetapkan hasil akhir yang sah dan objektif.\",\"visible\":true,\"align\":\"justify\"},{\"id\":\"sk_pernyataan\",\"kind\":\"paragraph\",\"title\":\"II. Pernyataan Penetapan Hasil Akhir\",\"content\":\"Dengan memohon rahmat Tuhan Yang Maha Esa, Panitia Pelaksana {{nama_instansi}} menetapkan daftar peserta peraih peringkat terbaik dan pemenang pada kegiatan {{nama_kegiatan}} (nilai tertinggi {{nilai_tertinggi}}, rata-rata {{nilai_rata_rata}}) sebagaimana tercantum pada tabel berikut:\",\"visible\":true,\"align\":\"justify\"},{\"id\":\"sk_tabel_pemenang\",\"kind\":\"winners_table\",\"title\":\"III. Daftar Pemenang dan Kategori Penghargaan\",\"content\":\"\",\"visible\":true,\"tableColumns\":[\"peringkat\",\"nama\",\"kelas\",\"nilai_akhir\",\"persentase\",\"kategori_juara\",\"keterangan\"]},{\"id\":\"sk_ketentuan\",\"kind\":\"notes\",\"title\":\"IV. Ketentuan & Keterangan Tambahan\",\"content\":\"1. Keputusan panitia dan pembina bersifat final berdasarkan data nilai aktual dan verifikasi integritas ujian.\\n2. Para pemenang diundang untuk menghadiri penyerahan sertifikat/penghargaan dan pembinaan intensif lanjutan {{nama_instansi}}.\\n3. Apabila terdapat kekeliruan administratif di kemudian hari, surat keputusan ini akan ditinjau dan diperbaiki sebagaimana mestinya.\",\"visible\":true},{\"id\":\"sk_penutup\",\"kind\":\"paragraph\",\"title\":\"V. Penutup\",\"content\":\"Demikian Surat Pengumuman dan Penetapan Pemenang ini diterbitkan secara resmi untuk disampaikan kepada seluruh peserta, pembina, dan pihak sekolah.\",\"visible\":true,\"align\":\"justify\"}],\"winnerRows\":[],\"signatories\":[{\"id\":\"sk_sig_1\",\"roleLabel\":\"Ketua Dewan Juri / Panitia,\",\"name\":\"Koordinator Akademik KIR IPA\",\"titleOrNip\":\"{{nama_instansi}}\",\"align\":\"left\"},{\"id\":\"sk_sig_2\",\"roleLabel\":\"Ditetapkan di {{place_city}} · Pembina Utama,\",\"name\":\"{{nama_penanggung_jawab}}\",\"titleOrNip\":\"Penanggung Jawab {{nama_sekolah}}\",\"align\":\"right\"}],\"headerFooter\":{\"headerText\":\"Surat Keputusan Resmi · {{nama_instansi}}\",\"footerText\":\"Dokumen Resmi Panitia Evaluasi Akademik KIR IPA SMA Negeri 1 Sukabumi\",\"showPageNumbers\":true},\"showStampArea\":true,\"tableHeaderBg\":\"#0F294A\"}",
+        "created_by": "usr_admin_01",
+        "created_at": "2026-11-22T02:42:42.228Z",
+        "updated_at": "2026-11-22T02:43:21.480Z"
+      },
+      {
+        "template_id": "tpl_ef66a9ca0f34",
+        "name": "Template Uji API Temp",
+        "doc_category": "LAPORAN_HASIL",
+        "exam_id": "",
+        "is_default": 0,
+        "content_json": "{\"typography\":{\"fontFamily\":\"sans\",\"fontSizePx\":11,\"lineHeight\":1.5,\"headerAlign\":\"center\",\"bodyAlign\":\"left\"},\"page\":{\"paperSize\":\"A4\",\"orientation\":\"portrait\",\"marginMm\":15},\"letterhead\":{\"showLogo\":true,\"logoUrl\":\"/src/assets/images/kir_ipa_logo_1795216569338.jpg\",\"orgLine1\":\"PEMERINTAH DAERAH PROVINSI JAWA BARAT · DINAS PENDIDIKAN\",\"orgLine2\":\"KELOMPOK ILMIAH REMAJA (KIR) IPA\",\"institutionName\":\"SMA NEGERI 1 SUKABUMI\",\"addressLine\":\"Sekretariat KIR IPA SMA Negeri 1 Sukabumi\",\"contactLine\":\"Jl. RH. Didi Sukardi No. 124, Sukabumi · kiripa@sman1sukabumi.sch.id\",\"borderStyle\":\"double\"},\"meta\":{\"title\":\"LAPORAN HASIL PELAKSANAAN UJIAN DIGITAL\",\"subtitle\":\"{{nama_ujian}} · Bidang {{bidang_mapel}}\",\"docNumber\":\"LAP/KIR-IPA/2026/001\",\"subjectLine\":\"Laporan Evaluasi & Rekapitulasi Nilai Peserta\",\"activityName\":\"{{nama_kegiatan}}\",\"placeAndDate\":\"Sukabumi, {{tanggal_terbit}}\"},\"sections\":[{\"id\":\"sec_identitas\",\"kind\":\"info_grid\",\"title\":\"I. Identitas Pelaksanaan Ujian\",\"content\":\"\",\"visible\":true,\"infoRows\":[{\"label\":\"Nama Kegiatan / Ujian\",\"value\":\"{{nama_ujian}}\"},{\"label\":\"Bidang / Mata Pelajaran\",\"value\":\"{{bidang_mapel}}\"},{\"label\":\"Hari / Tanggal Pelaksanaan\",\"value\":\"{{hari_pelaksanaan}}, {{tanggal_pelaksanaan}}\"},{\"label\":\"Durasi & Tahun Ajaran\",\"value\":\"{{durasi_menit}} · T.A. {{tahun_ajaran}}\"},{\"label\":\"Penanggung Jawab\",\"value\":\"{{nama_penanggung_jawab}}\"}]},{\"id\":\"sec_stats\",\"kind\":\"stats_cards\",\"title\":\"II. Ringkasan Partisipasi & Statistik Nilai\",\"content\":\"{{ringkasan_hasil}}\",\"visible\":true},{\"id\":\"sec_narasi\",\"kind\":\"paragraph\",\"title\":\"III. Uraian Pelaksanaan\",\"content\":\"Pelaksanaan {{nama_ujian}} diikuti oleh {{peserta_hadir}} peserta dari total {{peserta_terdaftar}} peserta terdaftar ({{peserta_tidak_hadir}} tidak hadir). Sebanyak {{peserta_selesai}} peserta berhasil menyelesaikan ujian dengan nilai tertinggi {{nilai_tertinggi}}, nilai terendah {{nilai_terendah}}, dan rata-rata {{nilai_rata_rata}}.\",\"visible\":true,\"align\":\"justify\"},{\"id\":\"sec_tabel_hasil\",\"kind\":\"results_table\",\"title\":\"IV. Rekapitulasi Daftar Nilai & Peringkat Peserta\",\"content\":\"\",\"visible\":true,\"tableColumns\":[\"peringkat\",\"nama\",\"kelas\",\"benar_salah\",\"nilai_akhir\",\"persentase\",\"status_lulus\"]},{\"id\":\"sec_pelanggaran\",\"kind\":\"violations_table\",\"title\":\"V. Rekapitulasi Pengawasan & Integritas\",\"content\":\"{{keterangan_tambahan}}\",\"visible\":true},{\"id\":\"sec_catatan\",\"kind\":\"notes\",\"title\":\"VI. Catatan & Rekomendasi Tindak Lanjut\",\"content\":\"Peserta yang memenuhi kriteria batas kelulusan ({{passing_grade}}) berhak mengikuti pembinaan lanjutan maupun seleksi tahap berikutnya bersama tim pembina {{nama_instansi}}.\",\"visible\":true}],\"winnerRows\":[],\"signatories\":[{\"id\":\"sig_1\",\"roleLabel\":\"Ketua Pelaksana Kegiatan\",\"name\":\"Panitia Evaluasi KIR IPA\",\"titleOrNip\":\"Sekretariat {{nama_instansi}}\",\"align\":\"left\"},{\"id\":\"sig_2\",\"roleLabel\":\"Pembina / Penanggung Jawab\",\"name\":\"{{nama_penanggung_jawab}}\",\"titleOrNip\":\"{{nama_sekolah}}\",\"align\":\"right\"}],\"headerFooter\":{\"headerText\":\"{{nama_instansi}} · {{nama_sekolah}}\",\"footerText\":\"Dokumen Resmi Panitia Evaluasi Akademik KIR IPA SMA Negeri 1 Sukabumi\",\"showPageNumbers\":true},\"showStampArea\":false,\"tableHeaderBg\":\"#0F294A\"}",
+        "created_by": "usr_admin_01",
+        "created_at": "2026-11-22T02:42:59.864Z",
+        "updated_at": "2026-11-22T02:42:59.864Z"
+      }
+    ],
+    "OFFICIAL_DOCUMENTS": [],
+    "CONFIG_VERSIONS": [
+      {
+        "version_id": "cfgv_f7e1378c03c7",
+        "version_number": 2,
+        "setting_key": "logo_url",
+        "category": "APP",
+        "old_value": "/src/assets/images/kir_ipa_logo_1795216569338.jpg",
+        "new_value": "/api/assets/logo_ast_474fafd016a2_1795865646531.png",
+        "changed_by": "usr_admin_01",
+        "changed_at": "2026-11-28T11:34:06.533Z",
+        "status": "APPLIED",
+        "note": "Unggah logo permanen (logo_ast_474fafd016a2_1795865646531.png)"
+      },
+      {
+        "version_id": "cfgv_6e50d5989987",
+        "version_number": 3,
+        "setting_key": "app_name",
+        "category": "APP",
+        "old_value": "CBT KIR IPA SMAN 1 SUKABUMI",
+        "new_value": "CBT KIR IPA TEST PERSISTENT",
+        "changed_by": "usr_admin_01",
+        "changed_at": "2026-11-28T11:34:10.484Z",
+        "status": "APPLIED",
+        "note": ""
+      }
+    ],
+    "APP_ASSETS": [
+      {
+        "asset_id": "ast_474fafd016a2",
+        "asset_type": "LOGO",
+        "filename": "logo_ast_474fafd016a2_1795865646531.png",
+        "mime_type": "image/png",
+        "size_bytes": 70,
+        "sha256": "e369608176e9ae6f6356a2e9fcb83dee80694efdd43b5c355e79fcd0d28e1596",
+        "file_path": "/app/applet/data/uploads/logo_ast_474fafd016a2_1795865646531.png",
+        "created_by": "usr_admin_01",
+        "created_at": "2026-11-28T11:34:06.532Z"
+      }
+    ],
+    "SYSTEM_METADATA": [
+      {
+        "meta_key": "LAST_SUCCESSFUL_BACKUP",
+        "meta_value": "2026-11-28T11:32:28.097Z",
+        "updated_at": "2026-11-28T11:32:28.100Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_BACKUPS",
+        "meta_value": "2",
+        "updated_at": "2026-11-28T11:32:28.101Z"
+      },
+      {
+        "meta_key": "LAST_SAVE_AT",
+        "meta_value": "2026-11-28T11:35:25.747Z",
+        "updated_at": "2026-11-28T11:35:25.747Z"
+      },
+      {
+        "meta_key": "LAST_MIGRATION_VERSION",
+        "meta_value": "002_persistence_hardening",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      },
+      {
+        "meta_key": "DATABASE_VERSION",
+        "meta_value": "2.0.0",
+        "updated_at": "2026-11-28T11:36:09.436Z"
+      },
+      {
+        "meta_key": "DATABASE_INITIALIZED",
+        "meta_value": "true",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      },
+      {
+        "meta_key": "APP_VERSION",
+        "meta_value": "2.2.0",
+        "updated_at": "2026-11-28T11:36:09.435Z"
+      },
+      {
+        "meta_key": "INSTALLATION_ID",
+        "meta_value": "inst_f67c2ad089be",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      },
+      {
+        "meta_key": "LAST_SYNC_CHECK_AT",
+        "meta_value": "2026-11-28T11:38:18.834Z",
+        "updated_at": "2026-11-28T11:38:18.834Z"
+      },
+      {
+        "meta_key": "CONFIG_VERSION",
+        "meta_value": "3",
+        "updated_at": "2026-11-28T11:34:10.484Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_CONFIG",
+        "meta_value": "3",
+        "updated_at": "2026-11-28T11:34:10.484Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_USERS",
+        "meta_value": "1",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_QUESTIONS",
+        "meta_value": "2",
+        "updated_at": "2026-11-28T11:35:25.746Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_EXAMS",
+        "meta_value": "1",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_RESULTS",
+        "meta_value": "1",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      },
+      {
+        "meta_key": "SYNC_VERSION_DOCUMENTS",
+        "meta_value": "1",
+        "updated_at": "2026-11-28T11:32:28.102Z"
+      }
+    ]
+  }
+}

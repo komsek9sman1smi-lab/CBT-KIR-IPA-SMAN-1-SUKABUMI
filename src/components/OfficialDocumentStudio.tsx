@@ -53,6 +53,7 @@ import type {
 interface OfficialDocumentStudioProps {
   config: Partial<AppSettingsMap>;
   currentUser: UserRecord;
+  syncTick?: number;
 }
 
 interface LiveContextResponse {
@@ -104,7 +105,7 @@ const FONT_FAMILY_STYLE: Record<DocumentContentPayload['typography']['fontFamily
   mono: "'JetBrains Mono', monospace",
 };
 
-export function OfficialDocumentStudio({ config }: OfficialDocumentStudioProps) {
+export function OfficialDocumentStudio({ config, syncTick = 0 }: OfficialDocumentStudioProps) {
   const [exams, setExams] = useState<ExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState('');
   const [activeTab, setActiveTab] = useState<StudioTab>('LAPORAN_HASIL');
@@ -140,8 +141,8 @@ export function OfficialDocumentStudio({ config }: OfficialDocumentStudioProps) 
     setTimeout(() => setToast(''), 4000);
   };
 
-  const loadInitialLists = useCallback(async () => {
-    setLoading(true);
+  const loadInitialLists = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [eRes, tRes, dRes] = await Promise.all([
         apiFetch<{ exams: ExamRecord[] }>('/exams'),
@@ -159,7 +160,7 @@ export function OfficialDocumentStudio({ config }: OfficialDocumentStudioProps) 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat data laporan & template.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -186,6 +187,15 @@ export function OfficialDocumentStudio({ config }: OfficialDocumentStudioProps) 
       void loadLiveContext(selectedExamId);
     }
   }, [selectedExamId, loadLiveContext]);
+
+  useEffect(() => {
+    if (syncTick > 0) {
+      void loadInitialLists(true);
+      if (selectedExamId) {
+        void loadLiveContext(selectedExamId);
+      }
+    }
+  }, [syncTick, selectedExamId, loadInitialLists, loadLiveContext]);
 
   const categoryTemplates = useMemo(
     () => templates.filter((t) => t.doc_category === activeCategory),

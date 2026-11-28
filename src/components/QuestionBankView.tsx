@@ -39,7 +39,13 @@ const MATH_SNIPPETS = [
   { label: 'Isotop', code: '$^{14}_{6}\\text{C}$' },
 ];
 
-export function QuestionBankView({ openCreatorImmediately = false }: { openCreatorImmediately?: boolean }) {
+export function QuestionBankView({
+  openCreatorImmediately = false,
+  syncTick = 0,
+}: {
+  openCreatorImmediately?: boolean;
+  syncTick?: number;
+}) {
   const [questions, setQuestions] = useState<Array<QuestionRecord & { creator_name?: string }>>([]);
   const [categories, setCategories] = useState<Array<{ category_id: string; category_name: string }>>([]);
   const [search, setSearch] = useState('');
@@ -100,8 +106,8 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [printOpen, setPrintOpen] = useState(false);
 
-  const loadData = async () => {
-    setLoading(true);
+  const loadData = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [qRes, cRes] = await Promise.all([
         apiFetch<{ questions: Array<QuestionRecord & { creator_name?: string }> }>('/questions'),
@@ -112,13 +118,19 @@ export function QuestionBankView({ openCreatorImmediately = false }: { openCreat
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat bank soal.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     void loadData();
   }, []);
+
+  useEffect(() => {
+    if (syncTick > 0 && !editorOpen && !importModalOpen) {
+      void loadData(true);
+    }
+  }, [syncTick]);
 
   useEffect(() => {
     if (openCreatorImmediately) {

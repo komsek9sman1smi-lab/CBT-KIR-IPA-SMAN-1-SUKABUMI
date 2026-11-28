@@ -30,8 +30,12 @@ function include(filename) {
   {
     path: 'Config.gs',
     folder: 'BACKEND',
-    description: 'Konfigurasi sistem, PropertiesService untuk ID Spreadsheet & Secret Key, dan konstanta nama sheet.',
+    description: 'Konfigurasi sistem, penguncian ID Spreadsheet permanen (anti-reset), PropertiesService, dan konstanta sheet.',
     content: `var SHEET_NAMES = {
+  SYSTEM_METADATA: 'SYSTEM_METADATA',
+  CONFIG_VERSIONS: 'CONFIG_VERSIONS',
+  SERVER_EVENTS: 'SERVER_EVENTS',
+  APP_ASSETS: 'APP_ASSETS',
   USERS: 'USERS',
   EXAMS: 'EXAMS',
   QUESTIONS: 'QUESTIONS',
@@ -52,10 +56,49 @@ function include(filename) {
   OFFICIAL_DOCUMENTS: 'OFFICIAL_DOCUMENTS'
 };
 
+var DEFAULT_SETTINGS_GAS = {
+  app_name: 'CBT KIR IPA SMAN 1 SUKABUMI',
+  org_name: 'Kelompok Ilmiah Remaja (KIR) IPA',
+  school_name: 'SMA Negeri 1 Sukabumi',
+  academic_year: '2026 / 2027',
+  management_period: 'Periode 2026–2027',
+  logo_url: '',
+  logo_drive_file_id: '',
+  primary_color: '#0F294A',
+  accent_color: '#D97706',
+  contact_info: 'Jl. RH. Didi Sukardi No. 124, Sukabumi',
+  announcement: 'Selamat datang di Portal Ujian Digital Resmi KIR IPA SMAN 1 Sukabumi.',
+  report_footer: 'Dokumen Resmi Panitia Evaluasi Akademik KIR IPA SMA Negeri 1 Sukabumi',
+  max_login_attempts: '5',
+  lockout_minutes: '5',
+  session_hours: '8',
+  professor_global_access: 'false'
+};
+
+// PENTING (ANTI-RESET): Jangan pernah membuat spreadsheet kosong secara otomatis jika ID belum ditemukan atau gagal dibuka.
 function getSpreadsheet() {
   var props = PropertiesService.getScriptProperties();
   var ssId = props.getProperty('CBT_SPREADSHEET_ID');
-  if (ssId) return SpreadsheetApp.openById(ssId);
+  if (ssId) {
+    try {
+      return SpreadsheetApp.openById(ssId);
+    } catch (err) {
+      throw new Error('Spreadsheet database (' + ssId + ') gagal dibuka: ' + err.message + '. Sistem menghentikan akses untuk mencegah reset data.');
+    }
+  }
+  var active = SpreadsheetApp.getActiveSpreadsheet();
+  if (active) {
+    props.setProperty('CBT_SPREADSHEET_ID', active.getId());
+    return active;
+  }
+  throw new Error('CBT_SPREADSHEET_ID belum dikonfigurasi dan skrip tidak terikat ke Spreadsheet aktif. Jalankan setupNewSpreadsheetOnce() hanya saat instalasi pertama.');
+}
+
+function setupNewSpreadsheetOnce() {
+  var props = PropertiesService.getScriptProperties();
+  if (props.getProperty('CBT_SPREADSHEET_ID') || props.getProperty('DATABASE_INITIALIZED') === 'true') {
+    throw new Error('Database sudah terikat ke Spreadsheet (' + props.getProperty('CBT_SPREADSHEET_ID') + '). Dilarang membuat database baru secara otomatis.');
+  }
   var active = SpreadsheetApp.getActiveSpreadsheet();
   if (active) {
     props.setProperty('CBT_SPREADSHEET_ID', active.getId());
@@ -79,11 +122,17 @@ function getAppSecret() {
   {
     path: 'Database.gs',
     folder: 'BACKEND',
-    description: 'Inisialisasi 18 sheet database secara otomatis beserta header kolom dan akun Super Admin awal.',
-    content: `var TABLE_SCHEMAS = {
+    description: 'Inisialisasi aman 22 sheet database, penanda DATABASE_INITIALIZED (anti-reset), dan migrasi skema aman tanpa menghapus data.',
+    content: `var GAS_DB_VERSION = '2.0.0';
+
+var TABLE_SCHEMAS = {
+  SYSTEM_METADATA: ['meta_key', 'meta_value', 'updated_at'],
+  CONFIG_VERSIONS: ['version_id', 'version_number', 'setting_key', 'category', 'old_value', 'new_value', 'changed_by', 'changed_at', 'status', 'note'],
+  SERVER_EVENTS: ['event_id', 'level', 'source', 'event_type', 'message', 'details', 'created_at'],
+  APP_ASSETS: ['asset_id', 'asset_type', 'filename', 'drive_file_id', 'mime_type', 'size_bytes', 'created_by', 'created_at'],
   USERS: ['user_id', 'username', 'password_hash', 'password_salt', 'nama', 'kelas', 'role', 'status', 'created_at'],
   EXAMS: ['exam_id', 'title', 'description', 'subject', 'start_time', 'end_time', 'duration', 'status', 'total_questions', 'created_by', 'settings_json'],
-  QUESTIONS: ['question_id', 'question_type', 'question_text', 'options_json', 'correct_answer', 'explanation', 'image_url', 'category', 'difficulty', 'score', 'created_by', 'created_at'],
+  QUESTIONS: ['question_id', 'question_type', 'question_text', 'options_json', 'correct_answer', 'explanation', 'image_url', 'category', 'materi', 'difficulty', 'score', 'created_by', 'created_at'],
   EXAM_QUESTIONS: ['id', 'exam_id', 'question_id', 'question_order', 'score'],
   EXAM_PARTICIPANTS: ['id', 'exam_id', 'user_id', 'status', 'started_at', 'submitted_at', 'score', 'session_id'],
   ANSWERS: ['answer_id', 'exam_id', 'user_id', 'question_id', 'answer_json', 'is_doubtful', 'saved_at', 'score'],
@@ -94,17 +143,31 @@ function getAppSecret() {
   AUDIT_LOGS: ['log_id', 'user_id', 'activity', 'timestamp', 'details'],
   EXAM_LOGS: ['log_id', 'exam_id', 'user_id', 'event_type', 'timestamp', 'details'],
   ESSAY_GRADES: ['grade_id', 'exam_id', 'question_id', 'user_id', 'score', 'feedback', 'graded_by', 'graded_at'],
-  BACKUP_LOGS: ['backup_id', 'file_id', 'created_at', 'created_by', 'status'],
+  BACKUP_LOGS: ['backup_id', 'file_id', 'created_at', 'created_by', 'status', 'backup_type'],
   EXAM_CATEGORIES: ['category_id', 'category_name', 'description', 'created_at'],
   NOTIFICATIONS: ['notification_id', 'user_id', 'title', 'message', 'created_at', 'is_read'],
   REPORT_TEMPLATES: ['template_id', 'name', 'doc_category', 'exam_id', 'is_default', 'content_json', 'created_by', 'created_at', 'updated_at'],
   OFFICIAL_DOCUMENTS: ['doc_id', 'exam_id', 'template_id', 'doc_category', 'title', 'doc_number', 'status', 'content_json', 'created_by', 'created_at', 'updated_at']
 };
 
+function setupDefaultSettings(ss) {
+  var sheet = ss.getSheetByName(SHEET_NAMES.SETTINGS);
+  if (!sheet) throw new Error('Sheet SETTINGS tidak ditemukan.');
+  var existingRows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+  var existingMap = {};
+  existingRows.forEach(function(r) { existingMap[String(r.setting_key)] = true; });
+  Object.keys(DEFAULT_SETTINGS_GAS).forEach(function(k) {
+    if (!existingMap[k]) {
+      sheet.appendRow([k, DEFAULT_SETTINGS_GAS[k]]);
+    }
+  });
+}
+
 function initializeDatabase() {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
+    var props = PropertiesService.getScriptProperties();
     var ss = getSpreadsheet();
     Object.keys(TABLE_SCHEMAS).forEach(function(sheetName) {
       var sheet = ss.getSheetByName(sheetName);
@@ -117,11 +180,59 @@ function initializeDatabase() {
         sheet.setFrozenRows(1);
       }
     });
+
+    var alreadyInit = props.getProperty('DATABASE_INITIALIZED') === 'true' || getMetaPropertyGas(ss, 'DATABASE_INITIALIZED') === 'true';
+    var existingUsers = readSheetAsObjects(SHEET_NAMES.USERS);
+    if (alreadyInit && existingUsers.length === 0) {
+      throw new Error('Pencegahan Reset Aktif: Database sudah pernah diinisialisasi tetapi sheet USERS kosong.');
+    }
+
     setupDefaultSettings(ss);
-    return { ok: true, spreadsheetUrl: ss.getUrl() };
+    migrateDatabaseSafely(ss);
+
+    if (!alreadyInit) {
+      var ts = new Date().toISOString();
+      var instId = props.getProperty('INSTALLATION_ID') || generateId('inst');
+      props.setProperty('INSTALLATION_ID', instId);
+      props.setProperty('DATABASE_INITIALIZED', 'true');
+      props.setProperty('DATABASE_VERSION', GAS_DB_VERSION);
+      setMetaPropertyGas(ss, 'DATABASE_INITIALIZED', 'true');
+      setMetaPropertyGas(ss, 'INSTALLATION_ID', instId);
+      setMetaPropertyGas(ss, 'DATABASE_VERSION', GAS_DB_VERSION);
+      setMetaPropertyGas(ss, 'CONFIG_VERSION', '1');
+      setMetaPropertyGas(ss, 'LAST_SAVE_AT', ts);
+    }
+    return { ok: true, spreadsheetUrl: ss.getUrl(), initialized: true };
   } finally {
     lock.releaseLock();
   }
+}
+
+function migrateDatabaseSafely(ss) {
+  var spreadsheet = ss || getSpreadsheet();
+  var props = PropertiesService.getScriptProperties();
+  var currentVer = props.getProperty('DATABASE_VERSION') || '';
+  if (currentVer === GAS_DB_VERSION) return { ok: true, migrated: false };
+
+  // Buat backup spreadsheet sebelum menambah kolom baru
+  spreadsheet.copy('AUTO_PRE_MIGRATION_CBT_KIR_IPA_' + Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd_HHmmss'));
+
+  Object.keys(TABLE_SCHEMAS).forEach(function(sheetName) {
+    var sheet = spreadsheet.getSheetByName(sheetName);
+    if (!sheet || sheet.getLastRow() === 0) return;
+    var existingHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    TABLE_SCHEMAS[sheetName].forEach(function(colName) {
+      if (existingHeaders.indexOf(colName) === -1) {
+        var nextCol = sheet.getLastColumn() + 1;
+        sheet.getRange(1, nextCol).setValue(colName).setFontWeight('bold');
+        existingHeaders.push(colName);
+      }
+    });
+  });
+
+  props.setProperty('DATABASE_VERSION', GAS_DB_VERSION);
+  setMetaPropertyGas(spreadsheet, 'DATABASE_VERSION', GAS_DB_VERSION);
+  return { ok: true, migrated: true, version: GAS_DB_VERSION };
 }
 
 function setupInitialSuperAdmin(username, rawPassword, namaLengkap) {
@@ -154,7 +265,7 @@ function setupInitialSuperAdmin(username, rawPassword, namaLengkap) {
   {
     path: 'Utils.gs',
     folder: 'BACKEND',
-    description: 'Fungsi utilitas pembacaan/penulisan sheet berbasis LockService, ID unik, sanitasi HTML, dan CacheService.',
+    description: 'Utilitas baca/tulis sheet berbasis LockService, metadata persisten, dan invalidasi CacheService otomatis.',
     content: `function generateId(prefix) {
   return prefix + '_' + Utilities.getUuid().replace(/-/g, '').slice(0, 12);
 }
@@ -178,7 +289,8 @@ function hashPasswordWithSalt(password, salt) {
 
 function readSheetAsObjects(sheetName) {
   var sheet = getSpreadsheet().getSheetByName(sheetName);
-  if (!sheet || sheet.getLastRow() < 2) return [];
+  if (!sheet) throw new Error('Sheet "' + sheetName + '" tidak ditemukan di Spreadsheet.');
+  if (sheet.getLastRow() < 2) return [];
   var data = sheet.getDataRange().getValues();
   var headers = data[0];
   var rows = [];
@@ -197,9 +309,11 @@ function appendRowObject(sheetName, obj) {
   lock.waitLock(15000);
   try {
     var sheet = getSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) throw new Error('Sheet "' + sheetName + '" tidak ditemukan.');
     var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
     var row = headers.map(function(h) { return obj[h] !== undefined ? obj[h] : ''; });
     sheet.appendRow(row);
+    SpreadsheetApp.flush();
   } finally {
     lock.releaseLock();
   }
@@ -210,6 +324,7 @@ function updateRowByKey(sheetName, keyCol, keyVal, updates) {
   lock.waitLock(15000);
   try {
     var sheet = getSpreadsheet().getSheetByName(sheetName);
+    if (!sheet) throw new Error('Sheet "' + sheetName + '" tidak ditemukan.');
     var data = sheet.getDataRange().getValues();
     var headers = data[0];
     var keyIdx = headers.indexOf(keyCol);
@@ -219,6 +334,7 @@ function updateRowByKey(sheetName, keyCol, keyVal, updates) {
           var colIdx = headers.indexOf(col);
           if (colIdx !== -1) sheet.getRange(i + 1, colIdx + 1).setValue(updates[col]);
         });
+        SpreadsheetApp.flush();
         return true;
       }
     }
@@ -226,6 +342,40 @@ function updateRowByKey(sheetName, keyCol, keyVal, updates) {
   } finally {
     lock.releaseLock();
   }
+}
+
+function getMetaPropertyGas(ss, key) {
+  var sheet = (ss || getSpreadsheet()).getSheetByName(SHEET_NAMES.SYSTEM_METADATA);
+  if (!sheet || sheet.getLastRow() < 2) return '';
+  var data = sheet.getDataRange().getValues();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(key)) return String(data[i][1] || '');
+  }
+  return '';
+}
+
+function setMetaPropertyGas(ss, key, val) {
+  var spreadsheet = ss || getSpreadsheet();
+  var sheet = spreadsheet.getSheetByName(SHEET_NAMES.SYSTEM_METADATA);
+  if (!sheet) return;
+  var data = sheet.getDataRange().getValues();
+  var ts = new Date().toISOString();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(key)) {
+      sheet.getRange(i + 1, 2).setValue(String(val));
+      sheet.getRange(i + 1, 3).setValue(ts);
+      SpreadsheetApp.flush();
+      return;
+    }
+  }
+  sheet.appendRow([String(key), String(val), ts]);
+  SpreadsheetApp.flush();
+}
+
+function invalidateSettingsCache(keys) {
+  var cache = CacheService.getScriptCache();
+  var list = keys || Object.keys(DEFAULT_SETTINGS_GAS);
+  list.forEach(function(k) { cache.remove('SETTING_' + k); });
 }
 
 function getSetting(key, fallback) {
@@ -642,7 +792,7 @@ function getMonitoringSnapshot(token, examId) {
   {
     path: 'AdminController.gs',
     folder: 'BACKEND',
-    description: 'Kontrol Super Admin: pengaturan identitas, keamanan, audit log read-only, dan penghentian ujian darurat.',
+    description: 'Kontrol Super Admin: pengaturan persisten dengan versioning & rollback, upload logo Drive, monitoring sinkronisasi, dan reset pabrik terproteksi.',
     content: `function recordAudit(userId, activity, details) {
   appendRowObject(SHEET_NAMES.AUDIT_LOGS, {
     log_id: generateId('aud'),
@@ -651,6 +801,89 @@ function getMonitoringSnapshot(token, examId) {
     timestamp: new Date().toISOString(),
     details: typeof details === 'string' ? details : JSON.stringify(details)
   });
+}
+
+function getPublicConfig() {
+  var rows = readSheetAsObjects(SHEET_NAMES.SETTINGS);
+  var cfg = {};
+  Object.keys(DEFAULT_SETTINGS_GAS).forEach(function(k) { cfg[k] = DEFAULT_SETTINGS_GAS[k]; });
+  rows.forEach(function(r) { cfg[r.setting_key] = String(r.setting_value || ''); });
+  cfg.config_version = Number(getMetaPropertyGas(null, 'CONFIG_VERSION') || 1);
+  return cfg;
+}
+
+function saveAppSettings(token, updates, expectedVersion) {
+  var auth = requireAuthorizedUser(token, ['SUPER_ADMIN']);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var ss = getSpreadsheet();
+    var currentVer = Number(getMetaPropertyGas(ss, 'CONFIG_VERSION') || 1);
+    if (expectedVersion !== undefined && Number(expectedVersion) !== currentVer) {
+      throw new Error('Konflik versi konfigurasi: versi server #' + currentVer + ', versi klien #' + expectedVersion);
+    }
+    var current = getPublicConfig();
+    var nextVer = currentVer + 1;
+    var ts = new Date().toISOString();
+    Object.keys(updates || {}).forEach(function(k) {
+      var nextVal = String(updates[k]);
+      var oldVal = String(current[k] || '');
+      if (nextVal !== oldVal) {
+        var updated = updateRowByKey(SHEET_NAMES.SETTINGS, 'setting_key', k, { setting_value: nextVal });
+        if (!updated) {
+          appendRowObject(SHEET_NAMES.SETTINGS, { setting_key: k, setting_value: nextVal });
+        }
+        appendRowObject(SHEET_NAMES.CONFIG_VERSIONS, {
+          version_id: generateId('cfgv'),
+          version_number: nextVer,
+          setting_key: k,
+          category: 'APP',
+          old_value: oldVal,
+          new_value: nextVal,
+          changed_by: auth.user.user_id,
+          changed_at: ts,
+          status: 'APPLIED',
+          note: ''
+        });
+      }
+    });
+    setMetaPropertyGas(ss, 'CONFIG_VERSION', String(nextVer));
+    setMetaPropertyGas(ss, 'LAST_SAVE_AT', ts);
+    invalidateSettingsCache(Object.keys(updates || {}));
+    recordAudit(auth.user.user_id, 'SETTINGS_UPDATE', { version: nextVer, keys: Object.keys(updates || {}) });
+    return { ok: true, config_version: nextVer, settings: getPublicConfig() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function uploadLogoToDrive(token, base64Data, filename, mimeType) {
+  var auth = requireAuthorizedUser(token, ['SUPER_ADMIN']);
+  var bytes = Utilities.base64Decode(base64Data);
+  var blob = Utilities.newBlob(bytes, mimeType || 'image/png', filename || 'logo_kir_ipa.png');
+  var file = DriveApp.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  var logoUrl = 'https://drive.google.com/uc?export=view&id=' + file.getId();
+  appendRowObject(SHEET_NAMES.APP_ASSETS, {
+    asset_id: generateId('ast'),
+    asset_type: 'LOGO',
+    filename: file.getName(),
+    drive_file_id: file.getId(),
+    mime_type: mimeType || 'image/png',
+    size_bytes: bytes.length,
+    created_by: auth.user.user_id,
+    created_at: new Date().toISOString()
+  });
+  return saveAppSettings(token, { logo_url: logoUrl, logo_drive_file_id: file.getId() });
+}
+
+function getSyncVersion() {
+  var ss = getSpreadsheet();
+  return {
+    server_time: new Date().toISOString(),
+    config_version: Number(getMetaPropertyGas(ss, 'CONFIG_VERSION') || 1),
+    last_save_at: getMetaPropertyGas(ss, 'LAST_SAVE_AT')
+  };
 }
 
 function emergencyStopExam(token, examId) {
@@ -758,21 +991,25 @@ function saveOfficialDocument(token, payload) {
   {
     path: 'BackupController.gs',
     folder: 'BACKEND',
-    description: 'Backup database Google Sheets ke Google Drive (JSON/Copy Spreadsheet) dan pemulihan dengan konfirmasi.',
-    content: `function createDatabaseBackup(token) {
+    description: 'Backup database Google Sheets ke Google Drive (Spreadsheet Copy + JSON) dan pemulihan aman dengan backup pra-pulih otomatis.',
+    content: `function createDatabaseBackup(token, backupType) {
   var auth = requireAuthorizedUser(token, ['SUPER_ADMIN']);
   var ss = getSpreadsheet();
-  var backupCopy = ss.copy('BACKUP_CBT_KIR_IPA_' + Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd_HHmmss'));
+  var stamp = Utilities.formatDate(new Date(), 'Asia/Jakarta', 'yyyyMMdd_HHmmss');
+  var backupCopy = ss.copy('BACKUP_CBT_KIR_IPA_' + stamp);
   var backupId = generateId('bkp');
+  var ts = new Date().toISOString();
   appendRowObject(SHEET_NAMES.BACKUP_LOGS, {
     backup_id: backupId,
     file_id: backupCopy.getId(),
-    created_at: new Date().toISOString(),
+    created_at: ts,
     created_by: auth.user.user_id,
-    status: 'SUCCESS'
+    status: 'SUCCESS',
+    backup_type: backupType || 'MANUAL'
   });
+  setMetaPropertyGas(ss, 'LAST_SUCCESSFUL_BACKUP', ts);
   recordAudit(auth.user.user_id, 'DATABASE_BACKUP', backupCopy.getUrl());
-  return { ok: true, backup_id: backupId, file_url: backupCopy.getUrl() };
+  return { ok: true, backup_id: backupId, file_id: backupCopy.getId(), file_url: backupCopy.getUrl() };
 }`,
   },
   {

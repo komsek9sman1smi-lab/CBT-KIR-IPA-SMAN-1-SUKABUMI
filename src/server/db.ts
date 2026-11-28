@@ -4,13 +4,61 @@ import crypto from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from './auth.ts';
 import { createDefaultTemplatePayload } from '../shared/documentTemplates.ts';
-import type { AppSettingsMap, DocumentCategory, ExamSettings } from '../shared/types.ts';
+import type {
+  AppSettingsMap,
+  BackupLogRecord,
+  ConfigVersionRecord,
+  DocumentCategory,
+  ExamSettings,
+  ServerEventRecord,
+  SyncDomain,
+  SyncVersionsMap,
+  SystemMonitoringStatus,
+  SystemSyncState,
+} from '../shared/types.ts';
 
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const DB_PATH = path.join(DATA_DIR, 'cbt_kir_ipa.sqlite');
-const BACKUP_DIR = path.join(DATA_DIR, 'backups');
+export const APP_VERSION = '2.2.0';
+export const DB_SCHEMA_VERSION = '2.0.0';
+export const FACTORY_RESET_CONFIRMATION_PHRASE = 'RESET PABRIK CBT KIR IPA';
+
+export interface DbPathsConfig {
+  dataDir: string;
+  dbPath: string;
+  backupDir: string;
+  uploadsDir: string;
+}
+
+export function getDefaultDbPaths(): DbPathsConfig {
+  const dataDir = path.resolve(process.cwd(), 'data');
+  return {
+    dataDir,
+    dbPath: path.join(dataDir, 'cbt_kir_ipa.sqlite'),
+    backupDir: path.join(dataDir, 'backups'),
+    uploadsDir: path.join(dataDir, 'uploads'),
+  };
+}
 
 let dbInstance: DatabaseSync | null = null;
+let lastDbErrorMessage: string | null = null;
+
+export class ConflictError extends Error {
+  status = 409;
+  code = 'VERSION_CONFLICT';
+  currentVersion: number;
+  constructor(message: string, currentVersion: number) {
+    super(message);
+    this.currentVersion = currentVersion;
+  }
+}
+
+export class DatabasePersistenceError extends Error {
+  status = 500;
+  code: string;
+  constructor(message: string, code = 'DB_PERSISTENCE_ERROR') {
+    super(message);
+    this.code = code;
+  }
+}
 
 export function uid(prefix: string): string {
   return `${prefix}_${crypto.randomUUID().replace(/-/g, '').slice(0, 12)}`;
@@ -20,6 +68,10 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+export function getLastDbError(): string | null {
+  return lastDbErrorMessage;
+}
+
 export function getDb(): DatabaseSync {
   if (!dbInstance) {
     initializeDatabase();
@@ -27,19 +79,122 @@ export function getDb(): DatabaseSync {
   return dbInstance!;
 }
 
-export function initializeDatabase(): DatabaseSync {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-  if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  }
+export function setDbInstanceForTesting(db: DatabaseSync | null) {
+  dbInstance = db;
+}
 
-  const db = new DatabaseSync(DB_PATH);
-  db.exec('PRAGMA journal_mode = WAL;');
-  db.exec('PRAGMA foreign_keys = ON;');
+function ensureDirectories(paths: DbPathsConfig) {
+  for (const dir of [paths.dataDir, paths.backupDir, paths.uploadsDir]) {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  }
+}
 
+function hasColumn(db: DatabaseSync, tableName: string, columnName: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>;
+  return cols.some((c) => c.name === columnName);
+}
+
+function addColumnIfMissing(db: DatabaseSync, tableName: string, columnName: string, definition: string) {
+  if (!hasColumn(db, tableName, columnName)) {
+    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition};`);
+  }
+}
+
+export function getMetaValue(db: DatabaseSync, key: string, fallback = ''): string {
+  const row = db
+    .prepare('SELECT meta_value FROM SYSTEM_METADATA WHERE meta_key = ?')
+    .get(key) as { meta_value: string } | undefined;
+  return row ? row.meta_value : fallback;
+}
+
+export function setMetaValue(db: DatabaseSync, key: string, value: string) {
+  db.prepare(
+    `INSERT INTO SYSTEM_METADATA (meta_key, meta_value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(meta_key) DO UPDATE SET
+       meta_value = excluded.meta_value,
+       updated_at = excluded.updated_at`,
+  ).run(key, value, nowIso());
+}
+
+export function recordServerEvent(
+  db: DatabaseSync,
+  payload: {
+    level: 'INFO' | 'WARN' | 'ERROR' | 'CRITICAL';
+    source: string;
+    event_type: string;
+    message: string;
+    details?: Record<string, unknown> | string;
+  },
+) {
+  try {
+    const detailsStr =
+      typeof payload.details === 'string'
+        ? payload.details
+        : payload.details
+          ? JSON.stringify(payload.details)
+          : '';
+    db.prepare(
+      'INSERT INTO SERVER_EVENTS (event_id, level, source, event_type, message, details, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    ).run(uid('evt'), payload.level, payload.source, payload.event_type, payload.message, detailsStr, nowIso());
+  } catch {
+    // Do not mask original DB error if event table itself cannot be written
+  }
+}
+
+function createCoreSchema(db: DatabaseSync) {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS SYSTEM_METADATA (
+      meta_key TEXT PRIMARY KEY,
+      meta_value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS SCHEMA_MIGRATIONS (
+      migration_id TEXT PRIMARY KEY,
+      version TEXT UNIQUE NOT NULL,
+      description TEXT NOT NULL,
+      applied_at TEXT NOT NULL,
+      backup_file TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS CONFIG_VERSIONS (
+      version_id TEXT PRIMARY KEY,
+      version_number INTEGER NOT NULL,
+      setting_key TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'APP',
+      old_value TEXT NOT NULL DEFAULT '',
+      new_value TEXT NOT NULL DEFAULT '',
+      changed_by TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'APPLIED',
+      note TEXT NOT NULL DEFAULT ''
+    );
+
+    CREATE TABLE IF NOT EXISTS SERVER_EVENTS (
+      event_id TEXT PRIMARY KEY,
+      level TEXT NOT NULL,
+      source TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      message TEXT NOT NULL,
+      details TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS APP_ASSETS (
+      asset_id TEXT PRIMARY KEY,
+      asset_type TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS USERS (
       user_id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
@@ -186,7 +341,10 @@ export function initializeDatabase(): DatabaseSync {
       file_id TEXT NOT NULL,
       created_at TEXT NOT NULL,
       created_by TEXT NOT NULL,
-      status TEXT NOT NULL
+      status TEXT NOT NULL,
+      backup_type TEXT NOT NULL DEFAULT 'MANUAL',
+      size_bytes INTEGER NOT NULL DEFAULT 0,
+      checksum_sha256 TEXT NOT NULL DEFAULT ''
     );
 
     CREATE TABLE IF NOT EXISTS EXAM_CATEGORIES (
@@ -239,9 +397,193 @@ export function initializeDatabase(): DatabaseSync {
     );
   `);
 
-  dbInstance = db;
+  // Safe additive column guards for pre-hardening databases before pre-migration backup logging
+  addColumnIfMissing(db, 'BACKUP_LOGS', 'backup_type', "TEXT NOT NULL DEFAULT 'MANUAL'");
+  addColumnIfMissing(db, 'BACKUP_LOGS', 'size_bytes', 'INTEGER NOT NULL DEFAULT 0');
+  addColumnIfMissing(db, 'BACKUP_LOGS', 'checksum_sha256', "TEXT NOT NULL DEFAULT ''");
+  addColumnIfMissing(db, 'QUESTIONS', 'materi', "TEXT NOT NULL DEFAULT ''");
+}
+
+interface MigrationStep {
+  version: string;
+  description: string;
+  apply: (db: DatabaseSync) => void;
+}
+
+const MIGRATIONS: MigrationStep[] = [
+  {
+    version: '001_initial_schema',
+    description: 'Skema dasar 18 tabel CBT KIR IPA',
+    apply: (db) => {
+      addColumnIfMissing(db, 'QUESTIONS', 'materi', "TEXT NOT NULL DEFAULT ''");
+    },
+  },
+  {
+    version: '002_persistence_hardening',
+    description: 'Penambahan metadata anti-reset, riwayat versi konfigurasi, aset permanen, dan metadata backup',
+    apply: (db) => {
+      addColumnIfMissing(db, 'BACKUP_LOGS', 'backup_type', "TEXT NOT NULL DEFAULT 'MANUAL'");
+      addColumnIfMissing(db, 'BACKUP_LOGS', 'size_bytes', 'INTEGER NOT NULL DEFAULT 0');
+      addColumnIfMissing(db, 'BACKUP_LOGS', 'checksum_sha256', "TEXT NOT NULL DEFAULT ''");
+      addColumnIfMissing(db, 'QUESTIONS', 'materi', "TEXT NOT NULL DEFAULT ''");
+    },
+  },
+];
+
+function runSafeMigrations(db: DatabaseSync, backupDir: string, existingHasData: boolean) {
+  const appliedRows = db
+    .prepare('SELECT version FROM SCHEMA_MIGRATIONS')
+    .all() as Array<{ version: string }>;
+  const appliedSet = new Set(appliedRows.map((r) => r.version));
+  const pending = MIGRATIONS.filter((m) => !appliedSet.has(m.version));
+  if (pending.length === 0) return;
+
+  let preMigrationBackupFile = '';
+  if (existingHasData) {
+    const bkp = createBackupSnapshot(db, 'system_migration', {
+      backupDir,
+      backupType: 'AUTO_PRE_MIGRATION',
+    });
+    preMigrationBackupFile = bkp.file_id;
+  }
+
+  for (const step of pending) {
+    db.exec('BEGIN IMMEDIATE;');
+    try {
+      step.apply(db);
+      db.prepare(
+        'INSERT INTO SCHEMA_MIGRATIONS (migration_id, version, description, applied_at, backup_file) VALUES (?, ?, ?, ?, ?)',
+      ).run(uid('mig'), step.version, step.description, nowIso(), preMigrationBackupFile);
+      db.exec('COMMIT;');
+    } catch (err) {
+      db.exec('ROLLBACK;');
+      recordServerEvent(db, {
+        level: 'CRITICAL',
+        source: 'db.ts',
+        event_type: 'MIGRATION_FAILED',
+        message: `Migrasi ${step.version} gagal dan dibatalkan.`,
+        details: { error: err instanceof Error ? err.message : String(err) },
+      });
+      throw err;
+    }
+  }
+
+  const latest = pending[pending.length - 1];
+  setMetaValue(db, 'LAST_MIGRATION_VERSION', latest.version);
+  setMetaValue(db, 'DATABASE_VERSION', DB_SCHEMA_VERSION);
+}
+
+function ensureSystemMetadataDefaults(db: DatabaseSync) {
+  const ts = nowIso();
+  const defaults: Record<string, string> = {
+    DATABASE_INITIALIZED: 'true',
+    DATABASE_VERSION: DB_SCHEMA_VERSION,
+    APP_VERSION: APP_VERSION,
+    INSTALLATION_ID: uid('inst'),
+    LAST_MIGRATION_VERSION: MIGRATIONS[MIGRATIONS.length - 1].version,
+    LAST_SUCCESSFUL_BACKUP: '',
+    LAST_SAVE_AT: ts,
+    LAST_SYNC_CHECK_AT: ts,
+    CONFIG_VERSION: '1',
+    SYNC_VERSION_CONFIG: '1',
+    SYNC_VERSION_USERS: '1',
+    SYNC_VERSION_QUESTIONS: '1',
+    SYNC_VERSION_EXAMS: '1',
+    SYNC_VERSION_RESULTS: '1',
+    SYNC_VERSION_DOCUMENTS: '1',
+    SYNC_VERSION_BACKUPS: '1',
+  };
+
+  const stmt = db.prepare(
+    'INSERT OR IGNORE INTO SYSTEM_METADATA (meta_key, meta_value, updated_at) VALUES (?, ?, ?)',
+  );
+  for (const [k, v] of Object.entries(defaults)) {
+    stmt.run(k, v, ts);
+  }
+  // Always keep current running app/db version synced without touching INSTALLATION_ID or CONFIG_VERSION
+  setMetaValue(db, 'APP_VERSION', APP_VERSION);
+  setMetaValue(db, 'DATABASE_VERSION', DB_SCHEMA_VERSION);
+}
+
+export function openAndInitializeDatabase(paths: DbPathsConfig = getDefaultDbPaths()): DatabaseSync {
+  ensureDirectories(paths);
+
+  const fileExistedBefore = fs.existsSync(paths.dbPath);
+  const fileSizeBefore = fileExistedBefore ? fs.statSync(paths.dbPath).size : 0;
+
+  let db: DatabaseSync;
+  try {
+    db = new DatabaseSync(paths.dbPath);
+    const check = db.prepare('PRAGMA quick_check;').get() as { quick_check?: string } | undefined;
+    if (!check || check.quick_check !== 'ok') {
+      throw new DatabasePersistenceError(
+        `Pemeriksaan integritas database gagal (${check?.quick_check || 'unknown'}).`,
+        'DB_INTEGRITY_FAILED',
+      );
+    }
+    db.exec('PRAGMA journal_mode = WAL;');
+    db.exec('PRAGMA foreign_keys = ON;');
+    db.exec('PRAGMA synchronous = NORMAL;');
+  } catch (err) {
+    lastDbErrorMessage = err instanceof Error ? err.message : String(err);
+    throw err;
+  }
+
+  // Ensure schema tables exist (never drops or clears existing tables)
+  createCoreSchema(db);
+
+  // Inspect existing initialization markers and actual table counts BEFORE running any seed
+  const initializedMeta = getMetaValue(db, 'DATABASE_INITIALIZED', '');
+  const existingUsers = (db.prepare('SELECT COUNT(*) as c FROM USERS').get() as { c: number }).c;
+  const existingSettings = (db.prepare('SELECT COUNT(*) as c FROM SETTINGS').get() as { c: number }).c;
+  const existingExams = (db.prepare('SELECT COUNT(*) as c FROM EXAMS').get() as { c: number }).c;
+  const existingHasData = existingUsers > 0 || existingSettings > 0 || existingExams > 0;
+
+  // Anti-reset check: if DB was previously marked initialized, NEVER auto-reseed if core tables are unexpectedly empty
+  if (initializedMeta === 'true' && (existingUsers === 0 || existingSettings === 0)) {
+    const msg =
+      'Pencegahan Reset Aktif: Database sudah pernah diinisialisasi namun tabel USERS/SETTINGS kosong. Sistem menolak reset otomatis ke pengaturan awal.';
+    recordServerEvent(db, {
+      level: 'CRITICAL',
+      source: 'initializeDatabase',
+      event_type: 'BLOCKED_SILENT_RESEED',
+      message: msg,
+      details: { existingUsers, existingSettings, fileExistedBefore, fileSizeBefore },
+    });
+    lastDbErrorMessage = msg;
+    throw new DatabasePersistenceError(msg, 'DB_EMPTY_AFTER_INIT');
+  }
+
+  // Run safe forward-only schema migrations (creates pre-migration backup automatically if data exists)
+  runSafeMigrations(db, paths.backupDir, existingHasData);
+
+  if (initializedMeta === 'true' || existingHasData) {
+    // Existing database (either already hardened or upgrading from pre-hardening DB):
+    // NEVER wipe or overwrite existing SETTINGS or USERS!
+    // Only fill missing new setting keys with INSERT OR IGNORE.
+    const insertMissingSetting = db.prepare(
+      'INSERT OR IGNORE INTO SETTINGS (setting_key, setting_value) VALUES (?, ?)',
+    );
+    for (const [k, v] of Object.entries(DEFAULT_APP_SETTINGS)) {
+      insertMissingSetting.run(k, v);
+    }
+    ensureDefaultReportTemplates(db, false);
+    ensureSystemMetadataDefaults(db);
+    lastDbErrorMessage = null;
+    return db;
+  }
+
+  // Brand-new empty installation: seed initial data once, then lock DATABASE_INITIALIZED = 'true'
   seedInitialData(db);
   ensureDefaultReportTemplates(db, false);
+  ensureSystemMetadataDefaults(db);
+  lastDbErrorMessage = null;
+  return db;
+}
+
+export function initializeDatabase(): DatabaseSync {
+  const db = openAndInitializeDatabase(getDefaultDbPaths());
+  dbInstance = db;
   return db;
 }
 
@@ -264,16 +606,359 @@ export const DEFAULT_APP_SETTINGS: AppSettingsMap = {
   professor_global_access: 'false',
 };
 
-export function getSettingsMap(db: DatabaseSync): AppSettingsMap {
-  const rows = db.prepare('SELECT setting_key, setting_value FROM SETTINGS').all() as Array<{
-    setting_key: string;
-    setting_value: string;
-  }>;
-  const map: Record<string, string> = { ...DEFAULT_APP_SETTINGS };
+export const ALLOWED_SETTING_KEYS: Array<keyof AppSettingsMap> = [
+  'app_name',
+  'org_name',
+  'school_name',
+  'academic_year',
+  'management_period',
+  'logo_url',
+  'primary_color',
+  'accent_color',
+  'contact_info',
+  'announcement',
+  'report_footer',
+  'max_login_attempts',
+  'lockout_minutes',
+  'session_hours',
+  'professor_global_access',
+];
+
+const SECURITY_SETTING_KEYS = new Set<string>([
+  'max_login_attempts',
+  'lockout_minutes',
+  'session_hours',
+  'professor_global_access',
+]);
+
+export function getSettingsMap(db: DatabaseSync, options: { strict?: boolean } = {}): AppSettingsMap {
+  let rows: Array<{ setting_key: string; setting_value: string }>;
+  try {
+    rows = db.prepare('SELECT setting_key, setting_value FROM SETTINGS').all() as Array<{
+      setting_key: string;
+      setting_value: string;
+    }>;
+  } catch (err) {
+    const msg = 'Gagal membaca tabel konfigurasi SETTINGS dari database server.';
+    recordServerEvent(db, {
+      level: 'CRITICAL',
+      source: 'getSettingsMap',
+      event_type: 'SETTINGS_READ_ERROR',
+      message: msg,
+      details: { error: err instanceof Error ? err.message : String(err) },
+    });
+    throw new DatabasePersistenceError(msg, 'SETTINGS_READ_ERROR');
+  }
+
+  const initialized = getMetaValue(db, 'DATABASE_INITIALIZED', '') === 'true';
+  if ((initialized || options.strict) && rows.length === 0) {
+    const msg =
+      'Tabel SETTINGS kosong padahal database sudah aktif. Sistem memblokir fallback ke pengaturan awal.';
+    recordServerEvent(db, {
+      level: 'CRITICAL',
+      source: 'getSettingsMap',
+      event_type: 'SETTINGS_EMPTY_AFTER_INIT',
+      message: msg,
+    });
+    throw new DatabasePersistenceError(msg, 'SETTINGS_EMPTY_AFTER_INIT');
+  }
+
+  const map: Record<string, string> = {};
   for (const r of rows) {
     map[r.setting_key] = r.setting_value;
   }
+  // Only supply default for keys that have never been stored yet (never overwrite stored values)
+  for (const [k, v] of Object.entries(DEFAULT_APP_SETTINGS)) {
+    if (map[k] === undefined) {
+      map[k] = v;
+    }
+  }
   return map as unknown as AppSettingsMap;
+}
+
+export function getConfigVersion(db: DatabaseSync): number {
+  return Math.max(1, Number(getMetaValue(db, 'CONFIG_VERSION', '1')) || 1);
+}
+
+const SYNC_META_KEY_MAP: Record<SyncDomain, string> = {
+  config: 'SYNC_VERSION_CONFIG',
+  users: 'SYNC_VERSION_USERS',
+  questions: 'SYNC_VERSION_QUESTIONS',
+  exams: 'SYNC_VERSION_EXAMS',
+  results: 'SYNC_VERSION_RESULTS',
+  documents: 'SYNC_VERSION_DOCUMENTS',
+  backups: 'SYNC_VERSION_BACKUPS',
+};
+
+export function getSyncVersions(db: DatabaseSync): SyncVersionsMap {
+  const out = {} as SyncVersionsMap;
+  for (const [domain, metaKey] of Object.entries(SYNC_META_KEY_MAP) as Array<[SyncDomain, string]>) {
+    out[domain] = Math.max(1, Number(getMetaValue(db, metaKey, '1')) || 1);
+  }
+  return out;
+}
+
+export function bumpSyncVersion(db: DatabaseSync, domain: SyncDomain): number {
+  const metaKey = SYNC_META_KEY_MAP[domain];
+  const next = Math.max(1, Number(getMetaValue(db, metaKey, '1')) || 1) + 1;
+  setMetaValue(db, metaKey, String(next));
+  setMetaValue(db, 'LAST_SAVE_AT', nowIso());
+  return next;
+}
+
+export function getSyncState(db: DatabaseSync): SystemSyncState {
+  // Verify DB is genuinely readable
+  db.prepare('SELECT 1 as ok').get();
+  const ts = nowIso();
+  setMetaValue(db, 'LAST_SYNC_CHECK_AT', ts);
+  return {
+    server_time: ts,
+    db_ok: true,
+    installation_id: getMetaValue(db, 'INSTALLATION_ID', 'unknown'),
+    app_version: getMetaValue(db, 'APP_VERSION', APP_VERSION),
+    db_version: getMetaValue(db, 'DATABASE_VERSION', DB_SCHEMA_VERSION),
+    config_version: getConfigVersion(db),
+    last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
+    last_backup_at: getMetaValue(db, 'LAST_SUCCESSFUL_BACKUP', ''),
+    sync_versions: getSyncVersions(db),
+  };
+}
+
+export function updateSettingsWithVersioning(
+  db: DatabaseSync,
+  updates: Partial<Record<keyof AppSettingsMap, unknown>>,
+  actorUserId: string,
+  options: { expectedVersion?: number; note?: string; status?: 'APPLIED' | 'ROLLED_BACK' } = {},
+): {
+  settings: AppSettingsMap;
+  config_version: number;
+  changed_keys: string[];
+  verified: boolean;
+} {
+  const currentVersion = getConfigVersion(db);
+  if (
+    options.expectedVersion !== undefined &&
+    Number(options.expectedVersion) !== currentVersion
+  ) {
+    throw new ConflictError(
+      `Konflik versi konfigurasi: versi server saat ini adalah #${currentVersion}, sedangkan halaman Anda masih memuat versi #${options.expectedVersion}. Muat ulang konfigurasi terbaru sebelum menyimpan.`,
+      currentVersion,
+    );
+  }
+
+  const existing = getSettingsMap(db, { strict: true });
+  const changedEntries: Array<{
+    key: keyof AppSettingsMap;
+    oldValue: string;
+    newValue: string;
+    category: 'APP' | 'SECURITY';
+  }> = [];
+
+  for (const key of ALLOWED_SETTING_KEYS) {
+    if (updates[key] === undefined) continue;
+    const nextVal = String(updates[key]);
+    const prevVal = String(existing[key] ?? '');
+    if (nextVal !== prevVal) {
+      changedEntries.push({
+        key,
+        oldValue: prevVal,
+        newValue: nextVal,
+        category: SECURITY_SETTING_KEYS.has(key) ? 'SECURITY' : 'APP',
+      });
+    }
+  }
+
+  if (changedEntries.length === 0) {
+    return {
+      settings: existing,
+      config_version: currentVersion,
+      changed_keys: [],
+      verified: true,
+    };
+  }
+
+  const nextVersion = currentVersion + 1;
+  const ts = nowIso();
+
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    const upsert = db.prepare(
+      `INSERT INTO SETTINGS (setting_key, setting_value) VALUES (?, ?)
+       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value`,
+    );
+    const insertVersion = db.prepare(
+      `INSERT INTO CONFIG_VERSIONS (version_id, version_number, setting_key, category, old_value, new_value, changed_by, changed_at, status, note)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+
+    for (const entry of changedEntries) {
+      upsert.run(entry.key, entry.newValue);
+      insertVersion.run(
+        uid('cfgv'),
+        nextVersion,
+        entry.key,
+        entry.category,
+        entry.oldValue,
+        entry.newValue,
+        actorUserId,
+        ts,
+        options.status || 'APPLIED',
+        options.note || '',
+      );
+    }
+
+    setMetaValue(db, 'CONFIG_VERSION', String(nextVersion));
+    bumpSyncVersion(db, 'config');
+
+    // Read-back verification inside transaction before commit
+    const verifyStmt = db.prepare('SELECT setting_value FROM SETTINGS WHERE setting_key = ?');
+    for (const entry of changedEntries) {
+      const row = verifyStmt.get(entry.key) as { setting_value: string } | undefined;
+      if (!row || row.setting_value !== entry.newValue) {
+        throw new DatabasePersistenceError(
+          `Verifikasi baca ulang gagal untuk pengaturan "${entry.key}".`,
+          'WRITE_VERIFICATION_FAILED',
+        );
+      }
+    }
+
+    db.exec('COMMIT;');
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    recordServerEvent(db, {
+      level: 'ERROR',
+      source: 'updateSettingsWithVersioning',
+      event_type: 'SETTINGS_SAVE_FAILED',
+      message: err instanceof Error ? err.message : 'Gagal menyimpan pengaturan.',
+      details: { keys: changedEntries.map((c) => c.key), actorUserId },
+    });
+    throw err;
+  }
+
+  logAudit(db, actorUserId, 'SETTINGS_UPDATE', {
+    version: nextVersion,
+    keys: changedEntries.map((c) => c.key),
+  });
+
+  return {
+    settings: getSettingsMap(db, { strict: true }),
+    config_version: nextVersion,
+    changed_keys: changedEntries.map((c) => c.key),
+    verified: true,
+  };
+}
+
+export function rollbackConfigVersion(
+  db: DatabaseSync,
+  versionId: string,
+  actorUserId: string,
+) {
+  const target = db
+    .prepare('SELECT * FROM CONFIG_VERSIONS WHERE version_id = ?')
+    .get(versionId) as ConfigVersionRecord | undefined;
+  if (!target) {
+    throw new Error('Riwayat versi konfigurasi tidak ditemukan.');
+  }
+  const key = target.setting_key as keyof AppSettingsMap;
+  if (!ALLOWED_SETTING_KEYS.includes(key)) {
+    throw new Error('Kunci konfigurasi pada riwayat ini tidak valid.');
+  }
+
+  // Restore to target's old_value (undo that specific change)
+  const result = updateSettingsWithVersioning(
+    db,
+    { [key]: target.old_value },
+    actorUserId,
+    {
+      status: 'ROLLED_BACK',
+      note: `Rollback perubahan #${target.version_number} (${target.setting_key})`,
+    },
+  );
+
+  logAudit(db, actorUserId, 'CONFIG_ROLLBACK', {
+    rolled_back_version_id: versionId,
+    setting_key: key,
+    new_config_version: result.config_version,
+  });
+
+  return result;
+}
+
+export function getConfigVersionHistory(db: DatabaseSync, limit = 50): ConfigVersionRecord[] {
+  return db
+    .prepare(
+      `SELECT cv.*, COALESCE(u.nama, cv.changed_by) as changed_by_name
+       FROM CONFIG_VERSIONS cv
+       LEFT JOIN USERS u ON u.user_id = cv.changed_by
+       ORDER BY cv.version_number DESC, cv.changed_at DESC
+       LIMIT ?`,
+    )
+    .all(limit) as unknown as ConfigVersionRecord[];
+}
+
+export function getServerEvents(db: DatabaseSync, limit = 50): ServerEventRecord[] {
+  return db
+    .prepare('SELECT * FROM SERVER_EVENTS ORDER BY created_at DESC LIMIT ?')
+    .all(limit) as unknown as ServerEventRecord[];
+}
+
+export function saveUploadedLogoFile(
+  db: DatabaseSync,
+  params: {
+    buffer: Buffer;
+    originalName: string;
+    mimeType: string;
+    ext: string;
+    uploadedBy: string;
+    uploadsDir?: string;
+  },
+): {
+  asset_id: string;
+  filename: string;
+  logo_url: string;
+  size_bytes: number;
+  sha256: string;
+} {
+  const uploadsDir = params.uploadsDir || getDefaultDbPaths().uploadsDir;
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+  }
+
+  const assetId = uid('ast');
+  const safeExt = params.ext.replace(/[^a-z0-9]/gi, '').toLowerCase() || 'png';
+  const filename = `logo_${assetId}_${Date.now()}.${safeExt}`;
+  const fullPath = path.resolve(uploadsDir, filename);
+  if (!fullPath.startsWith(path.resolve(uploadsDir) + path.sep)) {
+    throw new Error('Lokasi file upload tidak valid.');
+  }
+
+  fs.writeFileSync(fullPath, params.buffer);
+  const stat = fs.statSync(fullPath);
+  const writtenBytes = fs.readFileSync(fullPath);
+  const sha256 = crypto.createHash('sha256').update(writtenBytes).digest('hex');
+
+  if (stat.size !== params.buffer.length || stat.size === 0) {
+    throw new DatabasePersistenceError('Verifikasi ukuran file logo pada disk gagal.', 'UPLOAD_VERIFY_FAILED');
+  }
+
+  db.prepare(
+    `INSERT INTO APP_ASSETS (asset_id, asset_type, filename, mime_type, size_bytes, sha256, file_path, created_by, created_at)
+     VALUES (?, 'LOGO', ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(assetId, filename, params.mimeType, stat.size, sha256, fullPath, params.uploadedBy, nowIso());
+
+  logAudit(db, params.uploadedBy, 'LOGO_FILE_UPLOAD', {
+    asset_id: assetId,
+    filename,
+    size_bytes: stat.size,
+  });
+
+  return {
+    asset_id: assetId,
+    filename,
+    logo_url: `/api/assets/${encodeURIComponent(filename)}`,
+    size_bytes: stat.size,
+    sha256,
+  };
 }
 
 export function logAudit(db: DatabaseSync, userId: string, activity: string, details: Record<string, unknown> | string) {
@@ -314,20 +999,6 @@ function seedInitialData(db: DatabaseSync) {
 
   const userCount = (db.prepare('SELECT COUNT(*) as c FROM USERS').get() as { c: number }).c;
   if (userCount > 0) {
-    const legacyAdmin = db
-      .prepare('SELECT user_id, username FROM USERS WHERE user_id = ?')
-      .get('usr_admin_01') as { user_id: string; username: string } | undefined;
-    if (legacyAdmin && legacyAdmin.username === 'admin.kir') {
-      const { hash, salt } = hashPassword(process.env.SUPER_ADMIN_INITIAL_PASSWORD || 'guakeren');
-      db.prepare('UPDATE USERS SET username = ?, password_hash = ?, password_salt = ? WHERE user_id = ?').run(
-        'aetherium22',
-        hash,
-        salt,
-        'usr_admin_01',
-      );
-      db.prepare('DELETE FROM SESSIONS WHERE user_id = ?').run('usr_admin_01');
-      db.prepare('DELETE FROM LOGIN_ATTEMPTS WHERE username IN (?, ?)').run('admin.kir', 'aetherium22');
-    }
     return;
   }
 
@@ -585,7 +1256,6 @@ function seedInitialData(db: DatabaseSync) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
 
-  // Exam 1: Active OSN Selection Exam with all 7 question types
   insertExam.run(
     'exm_osn_2026',
     'Seleksi Internal OSN & Riset KIR IPA 2026',
@@ -600,7 +1270,6 @@ function seedInitialData(db: DatabaseSync) {
     JSON.stringify(defaultExamSettings),
   );
 
-  // Exam 2: Completed Exam with rich analytics & leaderboard data (6+ participants)
   insertExam.run(
     'exm_tryout_01',
     'Tryout Dasar Olimpiade Sains Tahap 1',
@@ -645,7 +1314,6 @@ function seedInitialData(db: DatabaseSync) {
     insertEQ.run(uid('eq'), 'exm_tryout_01', qId, ord, sc);
   }
 
-  // Register all 7 students to Exam 1 (BELUM_MULAI) and 6 students completed + 1 pending essay on Exam 2
   const insertPart = db.prepare(
     'INSERT INTO EXAM_PARTICIPANTS (id, exam_id, user_id, status, started_at, submitted_at, score, session_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
   );
@@ -737,7 +1405,6 @@ function seedInitialData(db: DatabaseSync) {
     );
   }
 
-  // Seed initial violation & audit log for realism
   db.prepare(
     'INSERT INTO VIOLATION_LOGS (log_id, exam_id, user_id, event_type, event_time, description) VALUES (?, ?, ?, ?, ?, ?)',
   ).run(
@@ -826,90 +1493,406 @@ export function ensureDefaultReportTemplates(
   }
 }
 
-export function createBackupSnapshot(db: DatabaseSync, createdBy: string) {
-  if (!fs.existsSync(BACKUP_DIR)) {
-    fs.mkdirSync(BACKUP_DIR, { recursive: true });
+export const BACKUP_TABLES = [
+  'USERS',
+  'EXAMS',
+  'QUESTIONS',
+  'EXAM_QUESTIONS',
+  'EXAM_PARTICIPANTS',
+  'ANSWERS',
+  'VIOLATION_LOGS',
+  'RESULTS',
+  'SETTINGS',
+  'AUDIT_LOGS',
+  'EXAM_LOGS',
+  'ESSAY_GRADES',
+  'EXAM_CATEGORIES',
+  'NOTIFICATIONS',
+  'REPORT_TEMPLATES',
+  'OFFICIAL_DOCUMENTS',
+  'CONFIG_VERSIONS',
+  'APP_ASSETS',
+  'SYSTEM_METADATA',
+] as const;
+
+export function createBackupSnapshot(
+  db: DatabaseSync,
+  createdBy: string,
+  options: {
+    backupDir?: string;
+    backupType?: 'MANUAL' | 'AUTO_SCHEDULED' | 'AUTO_PRE_MIGRATION' | 'AUTO_PRE_RESTORE' | 'AUTO_PRE_RESET';
+  } = {},
+) {
+  const backupDir = options.backupDir || getDefaultDbPaths().backupDir;
+  const backupType = options.backupType || 'MANUAL';
+  if (!fs.existsSync(backupDir)) {
+    fs.mkdirSync(backupDir, { recursive: true });
   }
-  const tables = [
-    'USERS',
-    'EXAMS',
-    'QUESTIONS',
-    'EXAM_QUESTIONS',
-    'EXAM_PARTICIPANTS',
-    'ANSWERS',
-    'VIOLATION_LOGS',
-    'RESULTS',
-    'SETTINGS',
-    'AUDIT_LOGS',
-    'EXAM_LOGS',
-    'ESSAY_GRADES',
-    'EXAM_CATEGORIES',
-    'NOTIFICATIONS',
-    'REPORT_TEMPLATES',
-    'OFFICIAL_DOCUMENTS',
-  ];
+
   const snapshot: Record<string, unknown[]> = {};
-  for (const t of tables) {
-    snapshot[t] = db.prepare(`SELECT * FROM ${t}`).all();
+  const recordCounts: Record<string, number> = {};
+  for (const t of BACKUP_TABLES) {
+    const rows = db.prepare(`SELECT * FROM ${t}`).all();
+    snapshot[t] = rows;
+    recordCounts[t] = rows.length;
   }
+
   const backupId = uid('bkp');
-  const fileName = `backup_${backupId}_${Date.now()}.json`;
-  const filePath = path.join(BACKUP_DIR, fileName);
-  fs.writeFileSync(filePath, JSON.stringify({ backup_id: backupId, created_at: nowIso(), snapshot }, null, 2));
+  const createdAt = nowIso();
+  const fileName = `backup_${backupType.toLowerCase()}_${backupId}_${Date.now()}.json`;
+  const filePath = path.join(backupDir, fileName);
+
+  const payload = {
+    backup_id: backupId,
+    backup_type: backupType,
+    app_version: APP_VERSION,
+    db_version: DB_SCHEMA_VERSION,
+    created_at: createdAt,
+    created_by: createdBy,
+    record_counts: recordCounts,
+    snapshot,
+  };
+
+  const jsonText = JSON.stringify(payload, null, 2);
+  const checksum = crypto.createHash('sha256').update(jsonText).digest('hex');
+  fs.writeFileSync(filePath, jsonText, 'utf8');
+
+  // Verify written backup file exists & parses cleanly
+  const verifiedRaw = fs.readFileSync(filePath, 'utf8');
+  const verifiedParsed = JSON.parse(verifiedRaw) as { backup_id?: string; snapshot?: Record<string, unknown[]> };
+  if (verifiedParsed.backup_id !== backupId || !verifiedParsed.snapshot?.USERS || !verifiedParsed.snapshot?.SETTINGS) {
+    throw new DatabasePersistenceError('Verifikasi file backup gagal setelah penulisan disk.', 'BACKUP_VERIFY_FAILED');
+  }
+  const sizeBytes = fs.statSync(filePath).size;
 
   db.prepare(
-    'INSERT INTO BACKUP_LOGS (backup_id, file_id, created_at, created_by, status) VALUES (?, ?, ?, ?, ?)',
-  ).run(backupId, fileName, nowIso(), createdBy, 'SUCCESS');
+    'INSERT INTO BACKUP_LOGS (backup_id, file_id, created_at, created_by, status, backup_type, size_bytes, checksum_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+  ).run(backupId, fileName, createdAt, createdBy, 'SUCCESS', backupType, sizeBytes, checksum);
 
-  logAudit(db, createdBy, 'DATABASE_BACKUP', { backup_id: backupId, file: fileName });
-  return { backup_id: backupId, file_id: fileName, snapshot };
+  setMetaValue(db, 'LAST_SUCCESSFUL_BACKUP', createdAt);
+  bumpSyncVersion(db, 'backups');
+
+  // Prune old AUTO_SCHEDULED backups beyond retention of 20 (never deletes manual or pre-action backups)
+  if (backupType === 'AUTO_SCHEDULED') {
+    const autoBackups = db
+      .prepare(
+        "SELECT backup_id, file_id FROM BACKUP_LOGS WHERE backup_type = 'AUTO_SCHEDULED' ORDER BY created_at DESC",
+      )
+      .all() as Array<{ backup_id: string; file_id: string }>;
+    for (const old of autoBackups.slice(20)) {
+      const p = path.resolve(backupDir, path.basename(old.file_id));
+      if (p.startsWith(path.resolve(backupDir) + path.sep) && fs.existsSync(p)) {
+        try {
+          fs.unlinkSync(p);
+        } catch {
+          // Ignore file unlink failure
+        }
+      }
+      db.prepare('DELETE FROM BACKUP_LOGS WHERE backup_id = ?').run(old.backup_id);
+    }
+  }
+
+  logAudit(db, createdBy, 'DATABASE_BACKUP', {
+    backup_id: backupId,
+    backup_type: backupType,
+    file: fileName,
+    size_bytes: sizeBytes,
+  });
+
+  return {
+    backup_id: backupId,
+    file_id: fileName,
+    backup_type: backupType,
+    size_bytes: sizeBytes,
+    checksum_sha256: checksum,
+    record_counts: recordCounts,
+    snapshot,
+  };
+}
+
+export function listBackupsWithVerification(
+  db: DatabaseSync,
+  backupDir: string = getDefaultDbPaths().backupDir,
+): BackupLogRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT b.*, COALESCE(u.nama, b.created_by) as creator_name
+       FROM BACKUP_LOGS b
+       LEFT JOIN USERS u ON u.user_id = b.created_by
+       ORDER BY b.created_at DESC`,
+    )
+    .all() as unknown as BackupLogRecord[];
+
+  return rows.map((row) => {
+    const safeName = path.basename(String(row.file_id || ''));
+    const fullPath = path.resolve(backupDir, safeName);
+    const exists =
+      Boolean(safeName) &&
+      fullPath.startsWith(path.resolve(backupDir) + path.sep) &&
+      fs.existsSync(fullPath);
+    const actualSize = exists ? fs.statSync(fullPath).size : 0;
+    return {
+      ...row,
+      file_exists: exists,
+      size_bytes: row.size_bytes || actualSize,
+    };
+  });
 }
 
 export function restoreBackupSnapshot(
   db: DatabaseSync,
   snapshot: Record<string, Record<string, unknown>[]>,
   restoredBy: string,
+  options: { backupDir?: string; skipPreBackup?: boolean } = {},
 ) {
-  const allowedTables = [
-    'USERS',
-    'EXAMS',
-    'QUESTIONS',
-    'EXAM_QUESTIONS',
-    'EXAM_PARTICIPANTS',
-    'ANSWERS',
-    'VIOLATION_LOGS',
-    'RESULTS',
-    'SETTINGS',
-    'AUDIT_LOGS',
-    'EXAM_LOGS',
-    'ESSAY_GRADES',
-    'EXAM_CATEGORIES',
-    'NOTIFICATIONS',
-    'REPORT_TEMPLATES',
-    'OFFICIAL_DOCUMENTS',
-  ];
+  if (!snapshot || typeof snapshot !== 'object') {
+    throw new Error('Format snapshot backup tidak valid.');
+  }
+  if (!Array.isArray(snapshot.USERS) || snapshot.USERS.length === 0) {
+    throw new Error('Snapshot backup ditolak karena tidak memiliki data USERS yang valid.');
+  }
+  if (!Array.isArray(snapshot.SETTINGS) || snapshot.SETTINGS.length === 0) {
+    throw new Error('Snapshot backup ditolak karena tidak memiliki data SETTINGS yang valid.');
+  }
 
-  db.exec('BEGIN TRANSACTION;');
+  if (!options.skipPreBackup) {
+    createBackupSnapshot(db, restoredBy, {
+      backupDir: options.backupDir,
+      backupType: 'AUTO_PRE_RESTORE',
+    });
+  }
+
+  const allowedTables = BACKUP_TABLES.filter((t) => t !== 'SYSTEM_METADATA');
+  const existingBackupLogs = db.prepare('SELECT * FROM BACKUP_LOGS').all();
+
+  db.exec('BEGIN IMMEDIATE;');
   try {
     for (const table of allowedTables) {
       const rows = snapshot[table];
       if (!Array.isArray(rows)) continue;
       db.prepare(`DELETE FROM ${table}`).run();
       if (rows.length === 0) continue;
-      const cols = Object.keys(rows[0]);
+
+      const validTableCols = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name),
+      );
+      const cols = Object.keys(rows[0]).filter((c) => validTableCols.has(c));
+      if (cols.length === 0) continue;
+
       const placeholders = cols.map(() => '?').join(', ');
       const stmt = db.prepare(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders})`);
       for (const row of rows) {
         stmt.run(...cols.map((c) => (row[c] ?? null) as string | number | null));
       }
     }
+
+    // Ensure metadata markers stay valid and never reset INSTALLATION_ID unintentionally
+    setMetaValue(db, 'DATABASE_INITIALIZED', 'true');
+    if (Array.isArray(snapshot.SYSTEM_METADATA)) {
+      const metaCfg = snapshot.SYSTEM_METADATA.find((r) => r.meta_key === 'CONFIG_VERSION');
+      if (metaCfg?.meta_value) {
+        setMetaValue(db, 'CONFIG_VERSION', String(metaCfg.meta_value));
+      }
+    }
+
+    // Re-ensure backup logs remain consistent if missing
+    if (existingBackupLogs.length > 0) {
+      const existingCount = (db.prepare('SELECT COUNT(*) as c FROM BACKUP_LOGS').get() as { c: number }).c;
+      if (existingCount === 0) {
+        const stmt = db.prepare(
+          'INSERT OR IGNORE INTO BACKUP_LOGS (backup_id, file_id, created_at, created_by, status, backup_type, size_bytes, checksum_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        );
+        for (const b of existingBackupLogs as Array<Record<string, unknown>>) {
+          stmt.run(
+            String(b.backup_id),
+            String(b.file_id),
+            String(b.created_at),
+            String(b.created_by),
+            String(b.status || 'SUCCESS'),
+            String(b.backup_type || 'MANUAL'),
+            Number(b.size_bytes || 0),
+            String(b.checksum_sha256 || ''),
+          );
+        }
+      }
+    }
+
+    for (const domain of Object.keys(SYNC_META_KEY_MAP) as SyncDomain[]) {
+      bumpSyncVersion(db, domain);
+    }
+
+    // Verify restored data before commit
+    const restoredUsersCount = (db.prepare('SELECT COUNT(*) as c FROM USERS').get() as { c: number }).c;
+    const restoredSettingsCount = (db.prepare('SELECT COUNT(*) as c FROM SETTINGS').get() as { c: number }).c;
+    if (restoredUsersCount === 0 || restoredSettingsCount === 0) {
+      throw new DatabasePersistenceError('Verifikasi pemulihan gagal: USERS/SETTINGS kosong.', 'RESTORE_VERIFY_FAILED');
+    }
+
     db.exec('COMMIT;');
   } catch (err) {
     db.exec('ROLLBACK;');
+    recordServerEvent(db, {
+      level: 'ERROR',
+      source: 'restoreBackupSnapshot',
+      event_type: 'RESTORE_FAILED',
+      message: err instanceof Error ? err.message : 'Pemulihan database gagal.',
+    });
     throw err;
   }
 
   logAudit(db, restoredBy, 'DATABASE_RESTORE', {
-    restored_tables: Object.keys(snapshot).filter((k) => allowedTables.includes(k)),
+    restored_tables: Object.keys(snapshot).filter((k) => allowedTables.includes(k as (typeof allowedTables)[number])),
   });
+}
+
+export function executeFactoryReset(
+  db: DatabaseSync,
+  params: {
+    actorUserId: string;
+    confirmationPhrase: string;
+    backupDir?: string;
+  },
+) {
+  if (params.confirmationPhrase !== FACTORY_RESET_CONFIRMATION_PHRASE) {
+    throw new Error(`Frasa konfirmasi harus persis: "${FACTORY_RESET_CONFIRMATION_PHRASE}"`);
+  }
+
+  // Mandatory verified backup before factory reset
+  const preResetBackup = createBackupSnapshot(db, params.actorUserId, {
+    backupDir: params.backupDir,
+    backupType: 'AUTO_PRE_RESET',
+  });
+
+  const tablesToReset = [
+    'ANSWERS',
+    'ESSAY_GRADES',
+    'RESULTS',
+    'VIOLATION_LOGS',
+    'EXAM_LOGS',
+    'EXAM_PARTICIPANTS',
+    'EXAM_QUESTIONS',
+    'EXAMS',
+    'QUESTIONS',
+    'EXAM_CATEGORIES',
+    'NOTIFICATIONS',
+    'OFFICIAL_DOCUMENTS',
+    'REPORT_TEMPLATES',
+    'CONFIG_VERSIONS',
+    'SETTINGS',
+    'SESSIONS',
+    'LOGIN_ATTEMPTS',
+    'USERS',
+  ];
+
+  db.exec('BEGIN IMMEDIATE;');
+  try {
+    for (const table of tablesToReset) {
+      db.prepare(`DELETE FROM ${table}`).run();
+    }
+    seedInitialData(db);
+    ensureDefaultReportTemplates(db, true, params.actorUserId);
+    setMetaValue(db, 'DATABASE_INITIALIZED', 'true');
+    setMetaValue(db, 'CONFIG_VERSION', '1');
+    for (const domain of Object.keys(SYNC_META_KEY_MAP) as SyncDomain[]) {
+      bumpSyncVersion(db, domain);
+    }
+    db.exec('COMMIT;');
+  } catch (err) {
+    db.exec('ROLLBACK;');
+    recordServerEvent(db, {
+      level: 'CRITICAL',
+      source: 'executeFactoryReset',
+      event_type: 'FACTORY_RESET_FAILED',
+      message: err instanceof Error ? err.message : 'Factory reset gagal.',
+    });
+    throw err;
+  }
+
+  logAudit(db, params.actorUserId, 'EXPLICIT_FACTORY_RESET', {
+    pre_reset_backup_id: preResetBackup.backup_id,
+    pre_reset_backup_file: preResetBackup.file_id,
+  });
+
+  recordServerEvent(db, {
+    level: 'WARN',
+    source: 'executeFactoryReset',
+    event_type: 'EXPLICIT_FACTORY_RESET',
+    message: 'Super Admin menjalankan reset pabrik eksplisit setelah backup otomatis.',
+    details: { actorUserId: params.actorUserId, preResetBackupFile: preResetBackup.file_id },
+  });
+
+  return {
+    ok: true,
+    pre_reset_backup_id: preResetBackup.backup_id,
+    pre_reset_backup_file: preResetBackup.file_id,
+  };
+}
+
+export function getSystemMonitoringStatus(
+  db: DatabaseSync,
+  options: {
+    dbPath?: string;
+    backupDir?: string;
+    autoBackupIntervalMinutes?: number;
+    gasFilesCount?: number;
+  } = {},
+): SystemMonitoringStatus {
+  const dbPath = options.dbPath || getDefaultDbPaths().dbPath;
+  const backupDir = options.backupDir || getDefaultDbPaths().backupDir;
+
+  let dbStatus: 'CONNECTED' | 'ERROR' = 'CONNECTED';
+  let dbError: string | undefined = lastDbErrorMessage || undefined;
+  try {
+    db.prepare('SELECT 1').get();
+  } catch (err) {
+    dbStatus = 'ERROR';
+    dbError = err instanceof Error ? err.message : String(err);
+  }
+
+  const countTable = (table: string) =>
+    (db.prepare(`SELECT COUNT(*) as c FROM ${table}`).get() as { c: number }).c;
+
+  const tableCounts: Record<string, number> = {
+    USERS: countTable('USERS'),
+    QUESTIONS: countTable('QUESTIONS'),
+    EXAMS: countTable('EXAMS'),
+    EXAM_PARTICIPANTS: countTable('EXAM_PARTICIPANTS'),
+    RESULTS: countTable('RESULTS'),
+    REPORT_TEMPLATES: countTable('REPORT_TEMPLATES'),
+    OFFICIAL_DOCUMENTS: countTable('OFFICIAL_DOCUMENTS'),
+    CONFIG_VERSIONS: countTable('CONFIG_VERSIONS'),
+    APP_ASSETS: countTable('APP_ASSETS'),
+    BACKUP_LOGS: countTable('BACKUP_LOGS'),
+  };
+
+  const backups = listBackupsWithVerification(db, backupDir);
+  const recentEvents = getServerEvents(db, 40);
+  const configVersions = getConfigVersionHistory(db, 40);
+
+  return {
+    server_status: 'ONLINE',
+    db_status: dbStatus,
+    db_error: dbError,
+    db_path: dbPath,
+    installation_id: getMetaValue(db, 'INSTALLATION_ID', ''),
+    app_version: getMetaValue(db, 'APP_VERSION', APP_VERSION),
+    db_version: getMetaValue(db, 'DATABASE_VERSION', DB_SCHEMA_VERSION),
+    last_migration_version: getMetaValue(db, 'LAST_MIGRATION_VERSION', ''),
+    database_initialized: getMetaValue(db, 'DATABASE_INITIALIZED', '') === 'true',
+    config_version: getConfigVersion(db),
+    last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
+    last_backup_at: getMetaValue(db, 'LAST_SUCCESSFUL_BACKUP', ''),
+    last_sync_check_at: getMetaValue(db, 'LAST_SYNC_CHECK_AT', ''),
+    auto_backup_interval_minutes: options.autoBackupIntervalMinutes ?? 360,
+    sync_versions: getSyncVersions(db),
+    gas_bundle_status: {
+      ready: true,
+      version: APP_VERSION,
+      files_count: options.gasFilesCount ?? 19,
+    },
+    table_counts: tableCounts,
+    backups_count: backups.filter((b) => b.file_exists).length,
+    recent_errors: recentEvents,
+    config_versions: configVersions,
+  };
 }

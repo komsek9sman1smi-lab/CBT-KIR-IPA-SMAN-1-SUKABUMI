@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 interface AppLogoProps {
   src?: string;
@@ -12,6 +12,10 @@ export function AppLogo({
   sizeClass = 'w-10 h-10',
 }: AppLogoProps) {
   const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    setFailed(false);
+  }, [src]);
 
   if (failed || !src) {
     return (

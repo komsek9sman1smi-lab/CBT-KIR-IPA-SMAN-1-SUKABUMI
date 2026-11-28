@@ -32,6 +32,7 @@ import type {
 interface ExamManagerViewProps {
   currentUser: UserRecord;
   openBuilderImmediately?: boolean;
+  syncTick?: number;
 }
 
 const DEFAULT_EXAM_SETTINGS: ExamSettings = {
@@ -57,6 +58,7 @@ const DEFAULT_EXAM_SETTINGS: ExamSettings = {
 export function ExamManagerView({
   currentUser,
   openBuilderImmediately = false,
+  syncTick = 0,
 }: ExamManagerViewProps) {
   const [exams, setExams] = useState<Array<ExamRecord & { participant_count?: number; creator_name?: string }>>([]);
   const [bankQuestions, setBankQuestions] = useState<QuestionRecord[]>([]);
@@ -114,8 +116,8 @@ export function ExamManagerView({
     }>;
   } | null>(null);
 
-  const loadAll = async () => {
-    setLoading(true);
+  const loadAll = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const [eRes, qRes, uRes] = await Promise.all([
         apiFetch<{ exams: Array<ExamRecord & { participant_count?: number; creator_name?: string }> }>('/exams'),
@@ -128,13 +130,19 @@ export function ExamManagerView({
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat data ujian.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
   useEffect(() => {
     void loadAll();
   }, []);
+
+  useEffect(() => {
+    if (syncTick > 0 && !builderOpen && !scheduleExam && !deleteTargetExam && !importExamTarget) {
+      void loadAll(true);
+    }
+  }, [syncTick]);
 
   const showToast = (msg: string) => {
     setToast(msg);

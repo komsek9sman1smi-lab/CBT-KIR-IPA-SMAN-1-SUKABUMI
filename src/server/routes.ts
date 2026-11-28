@@ -10,17 +10,33 @@ import {
   verifyPassword,
 } from './auth.ts';
 import {
+  ConflictError,
+  DatabasePersistenceError,
+  FACTORY_RESET_CONFIRMATION_PHRASE,
+  bumpSyncVersion,
   createBackupSnapshot,
   createNotification,
   ensureDefaultReportTemplates,
+  executeFactoryReset,
+  getConfigVersion,
   getDb,
+  getDefaultDbPaths,
+  getMetaValue,
   getSettingsMap,
+  getSyncState,
+  getSystemMonitoringStatus,
+  listBackupsWithVerification,
   logAudit,
   logExamEvent,
   nowIso,
+  recordServerEvent,
   restoreBackupSnapshot,
+  rollbackConfigVersion,
+  saveUploadedLogoFile,
   uid,
+  updateSettingsWithVersioning,
 } from './db.ts';
+import { GAS_PROJECT_FILES } from '../gas/gasBundle.ts';
 import {
   computeExamGradeSummary,
   computeItemAnalysis,
@@ -358,10 +374,58 @@ function recalculateExamResultForStudent(db: DatabaseSync, examId: string, userI
 export function createApiRouter() {
   const router = express.Router();
 
-  // 1. Public App Config (Identity & Announcement)
+  // 1. Public App Config (Identity & Announcement) + Persistent Assets + Sync State
+  router.get('/assets/:fileName', (req, res) => {
+    const safeName = path.basename(String(req.params.fileName || ''));
+    if (!safeName) {
+      res.status(404).end();
+      return;
+    }
+    const uploadsDir = getDefaultDbPaths().uploadsDir;
+    const fullPath = path.resolve(uploadsDir, safeName);
+    if (!fullPath.startsWith(path.resolve(uploadsDir) + path.sep) || !fs.existsSync(fullPath)) {
+      res.status(404).json({ error: 'Berkas aset tidak ditemukan di server.' });
+      return;
+    }
+    const ext = path.extname(safeName).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.gif': 'image/gif',
+    };
+    res.setHeader('Content-Type', mimeMap[ext] || 'application/octet-stream');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(fullPath);
+  });
+
+  router.get('/sync/version', (req, res) => {
+    const db = getDb();
+    const state = getSyncState(db);
+    const resolved = resolveSessionFromRequest(req);
+    if (!resolved) {
+      res.json({
+        server_time: state.server_time,
+        db_ok: state.db_ok,
+        installation_id: state.installation_id,
+        app_version: state.app_version,
+        db_version: state.db_version,
+        config_version: state.config_version,
+        last_save_at: state.last_save_at,
+        sync_versions: {
+          config: state.sync_versions.config,
+        },
+      });
+      return;
+    }
+    res.json(state);
+  });
+
   router.get('/public/config', (_req, res) => {
     const db = getDb();
-    const settings = getSettingsMap(db);
+    const settings = getSettingsMap(db, { strict: true });
+    res.setHeader('Cache-Control', 'no-store');
     res.json({
       app_name: settings.app_name,
       org_name: settings.org_name,
@@ -374,6 +438,9 @@ export function createApiRouter() {
       contact_info: settings.contact_info,
       announcement: settings.announcement,
       report_footer: settings.report_footer,
+      config_version: getConfigVersion(db),
+      installation_id: getMetaValue(db, 'INSTALLATION_ID', ''),
+      last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
     });
   });
 
@@ -757,6 +824,7 @@ export function createApiRouter() {
       'INSERT INTO USERS (user_id, username, password_hash, password_salt, nama, kelas, role, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
     ).run(userId, username, hash, salt, nama, kelas, requestedRole, 'ACTIVE', nowIso());
 
+    bumpSyncVersion(db, 'users');
     logAudit(db, req.authUser!.user_id, 'USER_CREATE', { target_user_id: userId, username, role: requestedRole });
     res.status(201).json({
       user: { user_id: userId, username, nama, kelas, role: requestedRole, status: 'ACTIVE' },
@@ -835,6 +903,7 @@ export function createApiRouter() {
       );
     }
 
+    bumpSyncVersion(db, 'users');
     logAudit(db, req.authUser!.user_id, 'USER_UPDATE', {
       target_user_id: target.user_id,
       username: nextUsername,
@@ -889,6 +958,7 @@ export function createApiRouter() {
       db.prepare('DELETE FROM ESSAY_GRADES WHERE user_id = ?').run(target.user_id);
       db.prepare('DELETE FROM NOTIFICATIONS WHERE user_id = ?').run(target.user_id);
       db.prepare('DELETE FROM USERS WHERE user_id = ?').run(target.user_id);
+      bumpSyncVersion(db, 'users');
       logAudit(db, req.authUser!.user_id, 'USER_DELETE', { target_user_id: target.user_id, username: target.username });
       db.exec('COMMIT;');
     } catch (err) {
@@ -951,6 +1021,7 @@ export function createApiRouter() {
       imported++;
     }
 
+    if (imported > 0) bumpSyncVersion(db, 'users');
     logAudit(db, req.authUser!.user_id, 'USER_IMPORT', {
       imported,
       skipped_duplicates,
@@ -1063,6 +1134,7 @@ export function createApiRouter() {
       nowIso(),
     );
 
+    bumpSyncVersion(db, 'questions');
     logAudit(db, req.authUser!.user_id, 'QUESTION_CREATE', { question_id: questionId, type: questionType });
     res.status(201).json({ question_id: questionId });
   });
@@ -1119,6 +1191,7 @@ export function createApiRouter() {
       existing.question_id,
     );
 
+    bumpSyncVersion(db, 'questions');
     logAudit(db, req.authUser!.user_id, 'QUESTION_UPDATE', { question_id: existing.question_id });
     res.json({ ok: true });
   });
@@ -1151,6 +1224,7 @@ export function createApiRouter() {
       req.authUser!.user_id,
       nowIso(),
     );
+    bumpSyncVersion(db, 'questions');
     logAudit(db, req.authUser!.user_id, 'QUESTION_DUPLICATE', { source: q.question_id, target: newId });
     res.status(201).json({ question_id: newId });
   });
@@ -1165,6 +1239,7 @@ export function createApiRouter() {
     }
     const upd = db.prepare('UPDATE QUESTIONS SET category = ? WHERE question_id = ?');
     for (const id of ids) upd.run(targetCategory, id);
+    bumpSyncVersion(db, 'questions');
     logAudit(db, req.authUser!.user_id, 'QUESTION_MOVE_CATEGORY', { count: ids.length, targetCategory });
     res.json({ ok: true, moved: ids.length });
   });
@@ -1316,6 +1391,7 @@ export function createApiRouter() {
       imported++;
     }
 
+    if (imported > 0) bumpSyncVersion(db, 'questions');
     logAudit(db, req.authUser!.user_id, 'QUESTION_IMPORT', {
       imported,
       skipped_duplicates,
@@ -1349,6 +1425,8 @@ export function createApiRouter() {
     }
     db.prepare('DELETE FROM EXAM_QUESTIONS WHERE question_id = ?').run(existing.question_id);
     db.prepare('DELETE FROM QUESTIONS WHERE question_id = ?').run(existing.question_id);
+    bumpSyncVersion(db, 'questions');
+    bumpSyncVersion(db, 'exams');
     logAudit(db, req.authUser!.user_id, 'QUESTION_DELETE', { question_id: existing.question_id });
     res.json({ ok: true });
   });
@@ -1464,6 +1542,7 @@ export function createApiRouter() {
         insPart.run(uid('prt'), examId, pid);
       }
 
+      bumpSyncVersion(db, 'exams');
       logAudit(db, req.authUser!.user_id, 'EXAM_CREATE', { exam_id: examId, title, status });
       db.exec('COMMIT;');
     } catch (err) {
@@ -1557,6 +1636,7 @@ export function createApiRouter() {
         }
       }
 
+      bumpSyncVersion(db, 'exams');
       logAudit(db, req.authUser!.user_id, 'EXAM_UPDATE', {
         exam_id: existing.exam_id,
         status: b.status ?? existing.status,
@@ -1597,6 +1677,7 @@ export function createApiRouter() {
       db.prepare('DELETE FROM ESSAY_GRADES WHERE exam_id = ?').run(existing.exam_id);
       db.prepare('DELETE FROM EXAM_LOGS WHERE exam_id = ?').run(existing.exam_id);
       db.prepare('DELETE FROM EXAMS WHERE exam_id = ?').run(existing.exam_id);
+      bumpSyncVersion(db, 'exams');
       logAudit(db, req.authUser!.user_id, 'EXAM_DELETE', { exam_id: existing.exam_id, title: existing.title });
       db.exec('COMMIT;');
     } catch (err) {
@@ -1621,6 +1702,7 @@ export function createApiRouter() {
       return;
     }
     db.prepare('UPDATE EXAMS SET status = ? WHERE exam_id = ?').run(nextStatus, exam.exam_id);
+    bumpSyncVersion(db, 'exams');
     logAudit(db, req.authUser!.user_id, 'EXAM_STATUS_CHANGE', {
       exam_id: exam.exam_id,
       from: exam.status,
@@ -1646,6 +1728,8 @@ export function createApiRouter() {
       finalizeParticipantSubmission(db, exam, p.user_id, 'ADMIN_FORCE_STOP');
     }
     db.prepare("UPDATE EXAMS SET status = 'COMPLETED' WHERE exam_id = ?").run(exam.exam_id);
+    bumpSyncVersion(db, 'exams');
+    bumpSyncVersion(db, 'results');
     logAudit(db, req.authUser!.user_id, 'EMERGENCY_STOP_EXAM', {
       exam_id: exam.exam_id,
       forced_participants: activeParts.length,
@@ -1660,6 +1744,7 @@ export function createApiRouter() {
       "INSERT OR IGNORE INTO EXAM_PARTICIPANTS (id, exam_id, user_id, status, started_at, submitted_at, score, session_id) VALUES (?, ?, ?, 'BELUM_MULAI', '', '', 0, '')",
     );
     for (const uidVal of userIds) ins.run(uid('prt'), req.params.examId, uidVal);
+    bumpSyncVersion(db, 'exams');
     logAudit(db, req.authUser!.user_id, 'EXAM_ASSIGN_PARTICIPANTS', {
       exam_id: req.params.examId,
       count: userIds.length,
@@ -1830,6 +1915,10 @@ export function createApiRouter() {
     }
 
     db.prepare('UPDATE EXAMS SET total_questions = ? WHERE exam_id = ?').run(linkedQIds.size, exam.exam_id);
+    if (imported > 0 || linked > 0) {
+      bumpSyncVersion(db, 'questions');
+      bumpSyncVersion(db, 'exams');
+    }
     logAudit(db, req.authUser!.user_id, 'EXAM_QUESTIONS_IMPORT', {
       exam_id: exam.exam_id,
       imported,
@@ -1921,6 +2010,8 @@ export function createApiRouter() {
       existingAssigned.add(targetUserId);
     }
 
+    if (imported > 0) bumpSyncVersion(db, 'users');
+    if (imported > 0 || linked > 0) bumpSyncVersion(db, 'exams');
     logAudit(db, req.authUser!.user_id, 'EXAM_PARTICIPANTS_IMPORT', {
       exam_id: exam.exam_id,
       imported,
@@ -2271,6 +2362,8 @@ export function createApiRouter() {
 
     const reason = req.body?.auto_submit ? 'AUTO_TIME_UP' : 'MANUAL_SUBMIT';
     const result = finalizeParticipantSubmission(db, exam, req.authUser!.user_id, reason);
+    bumpSyncVersion(db, 'results');
+    bumpSyncVersion(db, 'exams');
     res.json({ ok: true, result });
   });
 
@@ -2451,6 +2544,7 @@ export function createApiRouter() {
     ).run(boundedScore, examId, questionId, userId);
 
     recalculateExamResultForStudent(db, examId, userId);
+    bumpSyncVersion(db, 'results');
     logAudit(db, req.authUser!.user_id, 'ESSAY_GRADED', {
       exam_id: examId,
       question_id: questionId,
@@ -2528,6 +2622,7 @@ export function createApiRouter() {
     const db = getDb();
     const published = req.body?.published ? 1 : 0;
     db.prepare('UPDATE RESULTS SET published = ? WHERE exam_id = ?').run(published, req.params.examId);
+    bumpSyncVersion(db, 'results');
     logAudit(db, req.authUser!.user_id, published ? 'RESULTS_PUBLISH' : 'RESULTS_UNPUBLISH', {
       exam_id: req.params.examId,
     });
@@ -2561,6 +2656,7 @@ export function createApiRouter() {
       req.params.examId,
       userId,
     );
+    bumpSyncVersion(db, 'results');
     logAudit(db, req.authUser!.user_id, 'SCORE_CORRECTION', {
       exam_id: req.params.examId,
       student_id: userId,
@@ -3038,6 +3134,7 @@ export function createApiRouter() {
        VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     ).run(templateId, name, docCategory, String(b.exam_id ?? ''), contentJson, req.authUser!.user_id, ts, ts);
 
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_CREATE', { template_id: templateId, name, doc_category: docCategory });
     const created = db.prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?').get(templateId);
     res.status(201).json({ template: created });
@@ -3070,6 +3167,7 @@ export function createApiRouter() {
       'UPDATE REPORT_TEMPLATES SET name = ?, exam_id = ?, content_json = ?, updated_at = ? WHERE template_id = ?',
     ).run(nextName, nextExamId, nextContent, nowIso(), existing.template_id);
 
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_UPDATE', { template_id: existing.template_id, name: nextName });
     const updated = db.prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?').get(existing.template_id);
     res.json({ template: updated });
@@ -3092,6 +3190,7 @@ export function createApiRouter() {
        VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
     ).run(newId, copyName, src.doc_category, src.exam_id, src.content_json, req.authUser!.user_id, ts, ts);
 
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_DUPLICATE', { source: src.template_id, target: newId });
     const created = db.prepare('SELECT * FROM REPORT_TEMPLATES WHERE template_id = ?').get(newId);
     res.status(201).json({ template: created });
@@ -3116,6 +3215,7 @@ export function createApiRouter() {
       return;
     }
     db.prepare('DELETE FROM REPORT_TEMPLATES WHERE template_id = ?').run(existing.template_id);
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATE_DELETE', { template_id: existing.template_id });
     res.json({ ok: true });
   });
@@ -3123,6 +3223,7 @@ export function createApiRouter() {
   router.post('/report-templates/restore-defaults', requireAuth, requireRole('SUPER_ADMIN', 'PROFESSOR'), (req: AuthenticatedRequest, res) => {
     const db = getDb();
     ensureDefaultReportTemplates(db, true, req.authUser!.user_id);
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'REPORT_TEMPLATES_RESTORE_DEFAULT', {});
     const templates = db.prepare('SELECT * FROM REPORT_TEMPLATES ORDER BY is_default DESC, updated_at DESC').all();
     res.json({ ok: true, templates });
@@ -3189,6 +3290,7 @@ export function createApiRouter() {
       ts,
     );
 
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_SAVE', {
       doc_id: docId,
       doc_category: docCategory,
@@ -3236,6 +3338,7 @@ export function createApiRouter() {
       existing.doc_id,
     );
 
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_UPDATE', { doc_id: existing.doc_id, status: nextStatus });
     const updated = db.prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').get(existing.doc_id);
     res.json({ document: updated });
@@ -3267,6 +3370,7 @@ export function createApiRouter() {
       ts,
       ts,
     );
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_DUPLICATE', { source: src.doc_id, target: newId });
     const created = db.prepare('SELECT * FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').get(newId);
     res.status(201).json({ document: created });
@@ -3280,11 +3384,12 @@ export function createApiRouter() {
       return;
     }
     db.prepare('DELETE FROM OFFICIAL_DOCUMENTS WHERE doc_id = ?').run(req.params.docId);
+    bumpSyncVersion(db, 'documents');
     logAudit(db, req.authUser!.user_id, 'OFFICIAL_DOCUMENT_DELETE', { doc_id: req.params.docId });
     res.json({ ok: true });
   });
 
-  // 14. Super Admin: Audit Logs, Backups, App & Security Settings
+  // 14. Super Admin: Audit Logs, Persistent Assets, Backups, Settings Versioning, Server Monitoring & Guarded Factory Reset
   router.get('/audit-logs', requireAuth, requireRole('SUPER_ADMIN'), (req, res) => {
     const db = getDb();
     const activity = String(req.query.activity ?? '').trim().toLowerCase();
@@ -3310,31 +3415,79 @@ export function createApiRouter() {
     res.json({ logs });
   });
 
+  router.post('/uploads/logo', requireAuth, requireRole('SUPER_ADMIN'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const dataUrl = String(req.body?.data_url ?? '');
+    const originalName = String(req.body?.filename ?? 'logo.png').slice(0, 120);
+    const match = /^data:(image\/(?:png|jpeg|jpg|webp|gif));base64,([A-Za-z0-9+/=\s]+)$/i.exec(dataUrl);
+    if (!match) {
+      res.status(400).json({ error: 'Format logo tidak didukung. Gunakan file PNG, JPG, WEBP, atau GIF.' });
+      return;
+    }
+    const mimeType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
+    const extMap: Record<string, string> = {
+      'image/png': 'png',
+      'image/jpeg': 'jpg',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+    };
+    const buffer = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
+    if (buffer.length === 0 || buffer.length > 3 * 1024 * 1024) {
+      res.status(400).json({ error: 'Ukuran file logo harus antara 1 byte hingga 3 MB.' });
+      return;
+    }
+
+    const saved = saveUploadedLogoFile(db, {
+      buffer,
+      originalName,
+      mimeType,
+      ext: extMap[mimeType] || 'png',
+      uploadedBy: req.authUser!.user_id,
+    });
+
+    const saveLogoImmediately = req.body?.apply_immediately !== false;
+    let configVersion = getConfigVersion(db);
+    if (saveLogoImmediately) {
+      const updated = updateSettingsWithVersioning(
+        db,
+        { logo_url: saved.logo_url },
+        req.authUser!.user_id,
+        {
+          expectedVersion:
+            req.body?.expected_version !== undefined ? Number(req.body.expected_version) : undefined,
+          note: `Unggah logo permanen (${saved.filename})`,
+        },
+      );
+      configVersion = updated.config_version;
+    }
+
+    res.status(201).json({
+      ok: true,
+      logo_url: saved.logo_url,
+      asset: saved,
+      config_version: configVersion,
+      verified: true,
+    });
+  });
+
   router.get('/backups', requireAuth, requireRole('SUPER_ADMIN'), (_req, res) => {
     const db = getDb();
-    const backups = db
-      .prepare(
-        `SELECT b.*, u.nama as creator_name
-         FROM BACKUP_LOGS b
-         LEFT JOIN USERS u ON u.user_id = b.created_by
-         ORDER BY b.created_at DESC`,
-      )
-      .all();
+    const backups = listBackupsWithVerification(db);
     res.json({ backups });
   });
 
   router.post('/backups', requireAuth, requireRole('SUPER_ADMIN'), (req: AuthenticatedRequest, res) => {
     const db = getDb();
-    const result = createBackupSnapshot(db, req.authUser!.user_id);
+    const result = createBackupSnapshot(db, req.authUser!.user_id, { backupType: 'MANUAL' });
     res.status(201).json(result);
   });
 
   router.get('/backups/:fileId/download', requireAuth, requireRole('SUPER_ADMIN'), (req, res) => {
     const safeName = path.basename(String(req.params.fileId));
-    const backupDir = path.resolve(process.cwd(), 'data', 'backups');
+    const backupDir = getDefaultDbPaths().backupDir;
     const fullPath = path.resolve(backupDir, safeName);
-    if (!fullPath.startsWith(backupDir + path.sep) || !fs.existsSync(fullPath)) {
-      res.status(404).json({ error: 'Berkas backup tidak ditemukan.' });
+    if (!fullPath.startsWith(path.resolve(backupDir) + path.sep) || !fs.existsSync(fullPath)) {
+      res.status(404).json({ error: 'Berkas backup tidak ditemukan di penyimpanan server.' });
       return;
     }
     res.download(fullPath, safeName);
@@ -3342,51 +3495,155 @@ export function createApiRouter() {
 
   router.post('/backups/restore', requireAuth, requireRole('SUPER_ADMIN'), (req: AuthenticatedRequest, res) => {
     const db = getDb();
-    const snapshot = req.body?.snapshot;
+    let snapshot = req.body?.snapshot;
+
+    // Also support restoring directly from a verified server backup fileId
+    if (!snapshot && req.body?.file_id) {
+      const safeName = path.basename(String(req.body.file_id));
+      const backupDir = getDefaultDbPaths().backupDir;
+      const fullPath = path.resolve(backupDir, safeName);
+      if (!fullPath.startsWith(path.resolve(backupDir) + path.sep) || !fs.existsSync(fullPath)) {
+        res.status(404).json({ error: 'Berkas backup server tidak ditemukan.' });
+        return;
+      }
+      const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf8')) as {
+        snapshot?: Record<string, Record<string, unknown>[]>;
+      };
+      snapshot = parsed.snapshot || parsed;
+    }
+
     if (!snapshot || typeof snapshot !== 'object') {
       res.status(400).json({ error: 'Format snapshot JSON backup tidak valid.' });
       return;
     }
+
     restoreBackupSnapshot(db, snapshot, req.authUser!.user_id);
-    res.json({ ok: true });
+    res.json({ ok: true, config_version: getConfigVersion(db) });
   });
 
   router.get('/settings', requireAuth, requireRole('SUPER_ADMIN'), (_req, res) => {
     const db = getDb();
-    res.json({ settings: getSettingsMap(db) });
+    res.json({
+      settings: getSettingsMap(db, { strict: true }),
+      config_version: getConfigVersion(db),
+      last_save_at: getMetaValue(db, 'LAST_SAVE_AT', ''),
+    });
   });
 
   router.put('/settings', requireAuth, requireRole('SUPER_ADMIN'), (req: AuthenticatedRequest, res) => {
     const db = getDb();
     const updates = req.body?.settings ?? {};
-    const upsert = db.prepare(
-      `INSERT INTO SETTINGS (setting_key, setting_value) VALUES (?, ?)
-       ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value`,
-    );
-    const allowedKeys = [
-      'app_name',
-      'org_name',
-      'school_name',
-      'academic_year',
-      'management_period',
-      'logo_url',
-      'primary_color',
-      'accent_color',
-      'contact_info',
-      'announcement',
-      'report_footer',
-      'max_login_attempts',
-      'lockout_minutes',
-      'session_hours',
-      'professor_global_access',
-    ];
-    for (const key of allowedKeys) {
-      if (updates[key] !== undefined) {
-        upsert.run(key, String(updates[key]));
-      }
+    const expectedVersion =
+      req.body?.expected_version !== undefined ? Number(req.body.expected_version) : undefined;
+    const note = typeof req.body?.note === 'string' ? req.body.note.slice(0, 200) : '';
+
+    const result = updateSettingsWithVersioning(db, updates, req.authUser!.user_id, {
+      expectedVersion,
+      note,
+    });
+    res.json({
+      ok: true,
+      verified: result.verified,
+      changed_keys: result.changed_keys,
+      config_version: result.config_version,
+      settings: result.settings,
+    });
+  });
+
+  router.get('/settings/versions', requireAuth, requireRole('SUPER_ADMIN'), (req, res) => {
+    const db = getDb();
+    const limit = Math.min(200, Math.max(10, Number(req.query.limit ?? 50)));
+    const monitoring = getSystemMonitoringStatus(db, { gasFilesCount: GAS_PROJECT_FILES.length });
+    res.json({
+      config_version: monitoring.config_version,
+      versions: monitoring.config_versions.slice(0, limit),
+    });
+  });
+
+  router.post('/settings/rollback/:versionId', requireAuth, requireRole('SUPER_ADMIN'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const result = rollbackConfigVersion(db, String(req.params.versionId), req.authUser!.user_id);
+    res.json({
+      ok: true,
+      verified: result.verified,
+      config_version: result.config_version,
+      settings: result.settings,
+    });
+  });
+
+  router.get('/system/monitoring', requireAuth, requireRole('SUPER_ADMIN'), (_req, res) => {
+    const db = getDb();
+    const monitoring = getSystemMonitoringStatus(db, {
+      gasFilesCount: GAS_PROJECT_FILES.length,
+    });
+    res.json(monitoring);
+  });
+
+  router.post('/system/factory-reset', requireAuth, requireRole('SUPER_ADMIN'), (req: AuthenticatedRequest, res) => {
+    const db = getDb();
+    const password = String(req.body?.password ?? '');
+    const confirmationPhrase = String(req.body?.confirmation_phrase ?? '').trim();
+    const acknowledged = Boolean(req.body?.acknowledge_backup_and_reset);
+
+    if (!acknowledged) {
+      res.status(400).json({ error: 'Anda wajib menyetujui pembuatan backup otomatis dan penghapusan data.' });
+      return;
     }
-    logAudit(db, req.authUser!.user_id, 'SETTINGS_UPDATE', { keys: Object.keys(updates) });
-    res.json({ ok: true, settings: getSettingsMap(db) });
+    if (confirmationPhrase !== FACTORY_RESET_CONFIRMATION_PHRASE) {
+      res.status(400).json({
+        error: `Frasa konfirmasi tidak cocok. Ketik persis: ${FACTORY_RESET_CONFIRMATION_PHRASE}`,
+      });
+      return;
+    }
+
+    const adminRow = db
+      .prepare('SELECT password_hash, password_salt FROM USERS WHERE user_id = ?')
+      .get(req.authUser!.user_id) as { password_hash: string; password_salt: string } | undefined;
+    if (!adminRow || !verifyPassword(password, adminRow.password_hash, adminRow.password_salt)) {
+      res.status(403).json({ error: 'Password Super Admin tidak valid. Reset pabrik dibatalkan.' });
+      return;
+    }
+
+    const result = executeFactoryReset(db, {
+      actorUserId: req.authUser!.user_id,
+      confirmationPhrase,
+    });
+    res.json(result);
+  });
+
+  // Centralized API Error Handler (logs server/persistence errors without masking failures)
+  router.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof ConflictError) {
+      res.status(409).json({
+        error: err.message,
+        code: err.code,
+        current_version: err.currentVersion,
+      });
+      return;
+    }
+    const status =
+      err instanceof DatabasePersistenceError
+        ? err.status
+        : typeof (err as { status?: number })?.status === 'number'
+          ? (err as { status: number }).status
+          : 500;
+    const message = err instanceof Error ? err.message : 'Terjadi kesalahan internal server.';
+    try {
+      const db = getDb();
+      recordServerEvent(db, {
+        level: status >= 500 ? 'ERROR' : 'WARN',
+        source: `${req.method} ${req.path}`,
+        event_type:
+          err instanceof DatabasePersistenceError ? err.code : 'API_ROUTE_ERROR',
+        message,
+      });
+    } catch {
+      // Ignore if DB itself is unreachable
+    }
+    res.status(status).json({
+      error: message,
+      code: err instanceof DatabasePersistenceError ? err.code : undefined,
+    });
   });
 
   return router;

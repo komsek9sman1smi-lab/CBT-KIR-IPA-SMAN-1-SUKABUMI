@@ -358,3 +358,90 @@ export interface ImportSummaryResult {
   errors: ImportErrorDetail[];
 }
 
+export type SyncDomain =
+  | 'config'
+  | 'users'
+  | 'questions'
+  | 'exams'
+  | 'results'
+  | 'documents'
+  | 'backups';
+
+export type SyncVersionsMap = Record<SyncDomain, number>;
+
+export interface SystemSyncState {
+  server_time: string;
+  db_ok: boolean;
+  installation_id: string;
+  app_version: string;
+  db_version: string;
+  config_version: number;
+  last_save_at: string;
+  last_backup_at: string;
+  sync_versions: SyncVersionsMap;
+}
+
+export interface ConfigVersionRecord {
+  version_id: string;
+  version_number: number;
+  setting_key: string;
+  category: 'APP' | 'SECURITY';
+  old_value: string;
+  new_value: string;
+  changed_by: string;
+  changed_by_name?: string;
+  changed_at: string;
+  status: 'APPLIED' | 'ROLLED_BACK';
+  note: string;
+}
+
+export interface ServerEventRecord {
+  event_id: string;
+  level: 'INFO' | 'WARN' | 'ERROR' | 'CRITICAL';
+  source: string;
+  event_type: string;
+  message: string;
+  details: string;
+  created_at: string;
+}
+
+export interface BackupLogRecord {
+  backup_id: string;
+  file_id: string;
+  created_at: string;
+  created_by: string;
+  creator_name?: string;
+  status: string;
+  backup_type?: string;
+  size_bytes?: number;
+  checksum_sha256?: string;
+  file_exists?: boolean;
+}
+
+export interface SystemMonitoringStatus {
+  server_status: 'ONLINE';
+  db_status: 'CONNECTED' | 'ERROR';
+  db_error?: string;
+  db_path: string;
+  installation_id: string;
+  app_version: string;
+  db_version: string;
+  last_migration_version: string;
+  database_initialized: boolean;
+  config_version: number;
+  last_save_at: string;
+  last_backup_at: string;
+  last_sync_check_at: string;
+  auto_backup_interval_minutes: number;
+  sync_versions: SyncVersionsMap;
+  gas_bundle_status: {
+    ready: boolean;
+    version: string;
+    files_count: number;
+  };
+  table_counts: Record<string, number>;
+  backups_count: number;
+  recent_errors: ServerEventRecord[];
+  config_versions: ConfigVersionRecord[];
+}
+

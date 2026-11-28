@@ -24,9 +24,14 @@ import type { ImportSummaryResult, UserRecord, UserRole } from '../shared/types'
 interface UserManagementViewProps {
   currentUser: UserRecord;
   lockedRoleFilter?: UserRole;
+  syncTick?: number;
 }
 
-export function UserManagementView({ currentUser, lockedRoleFilter }: UserManagementViewProps) {
+export function UserManagementView({
+  currentUser,
+  lockedRoleFilter,
+  syncTick = 0,
+}: UserManagementViewProps) {
   const [users, setUsers] = useState<UserRecord[]>([]);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>(lockedRoleFilter || '');
@@ -55,8 +60,8 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
 
   const pageSize = 10;
 
-  const loadUsers = async () => {
-    setLoading(true);
+  const loadUsers = async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const qs = new URLSearchParams();
       const effectiveRole = lockedRoleFilter || roleFilter;
@@ -64,11 +69,11 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
       if (search.trim()) qs.set('search', search.trim());
       const res = await apiFetch<{ users: UserRecord[] }>(`/users?${qs.toString()}`);
       setUsers(res.users);
-      setPage(1);
+      if (!silent) setPage(1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Gagal memuat pengguna.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -79,6 +84,12 @@ export function UserManagementView({ currentUser, lockedRoleFilter }: UserManage
   useEffect(() => {
     void loadUsers();
   }, [lockedRoleFilter, roleFilter]);
+
+  useEffect(() => {
+    if (syncTick > 0 && !modalOpen && !resetTarget && !importModalOpen) {
+      void loadUsers(true);
+    }
+  }, [syncTick]);
 
   const showToast = (msg: string) => {
     setToast(msg);

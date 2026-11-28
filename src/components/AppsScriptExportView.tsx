@@ -39,7 +39,7 @@ export function AppsScriptExportView() {
             Paket Kode Google Apps Script & Panduan Deploy
           </h2>
           <p className="text-sm text-slate-600 mt-1">
-            Kode modular siap pasang untuk Google Apps Script Web App + Google Sheets (16 sheet) + Google Drive.
+            Kode modular siap pasang untuk Google Apps Script Web App + Google Sheets (22 sheet terproteksi anti-reset) + Google Drive.
           </p>
         </div>
         <button
@@ -66,7 +66,7 @@ export function AppsScriptExportView() {
             <strong className="text-slate-900">Salin Semua File Backend (.gs) & Frontend (.html):</strong> Di editor Apps Script, buat file Script (`.gs`) dan HTML (`.html`) sesuai daftar di bawah (misalnya <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">Code.gs</code>, <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">Config.gs</code>, <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">Database.gs</code>, dst.).
           </li>
           <li className="p-4 rounded-lg bg-slate-50 border border-slate-200">
-            <strong className="text-slate-900">Inisialisasi 16 Sheet & Super Admin:</strong> Pilih fungsi <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">initializeDatabase</code> di toolbar editor GAS lalu klik <strong>Jalankan</strong> dan berikan izin akses Sheets/Drive. Jalankan <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">setupInitialSuperAdmin</code> sekali saja untuk membuat akun Pembina Utama.
+            <strong className="text-slate-900">Inisialisasi 22 Sheet & Super Admin:</strong> Pilih fungsi <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">initializeDatabase</code> di toolbar editor GAS (sistem mengunci `CBT_SPREADSHEET_ID` dan `DATABASE_INITIALIZED` agar tidak pernah reset otomatis), lalu jalankan <code className="font-mono text-xs bg-white px-1 py-0.5 border rounded">setupInitialSuperAdmin</code> sekali saja.
           </li>
           <li className="p-4 rounded-lg bg-slate-50 border border-slate-200">
             <strong className="text-slate-900">Deploy sebagai Web App:</strong> Klik <strong>Deploy → New Deployment</strong>, pilih tipe <strong>Web app</strong>, atur <em>Execute as: Me</em> dan <em>Who has access: Anyone</em> (atau domain sekolah), lalu salin URL Web App untuk dibagikan ke siswa dan pengawas.
